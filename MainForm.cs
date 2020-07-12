@@ -5,13 +5,13 @@ using Idmr.LfdReader;
 
 namespace Idmr.TieLayoutEditor
 {
-	public partial class frmFile : Form
+	public partial class MainForm : Form
 	{
 		string _filePath = "";
-		frmView _fView = null;
+		ViewForm _fView = null;
 		LfdFile _lfd;
 
-		public frmFile()
+		public MainForm()
 		{
 			InitializeComponent();
 			Height = 376;
@@ -32,15 +32,9 @@ namespace Idmr.TieLayoutEditor
 				_filePath = txtFilename.Text;
 				if (Resource.GetType(stream, 0) != Resource.ResourceType.Rmap) { stream.Close(); return; }	// no RMAP found, FILMs never solo
 				_lfd = new LfdFile(stream);
-				int found = 0;
 				for (int i = 0; i < _lfd.Resources.Count; i++)
-				{
 					if (_lfd.Resources[i].Type == Resource.ResourceType.Film)
-					{
-						found++;
 						_lfd.Resources[i].Tag = Resource.ResourceType.Film + lstFILM.Items.Add(_lfd.Resources[i].Name).ToString();
-					}
-				}
 				if (lstFILM.Items.Count == 1)
 				{
 					lstFILM.SelectedIndex = 0;
@@ -79,7 +73,7 @@ namespace Idmr.TieLayoutEditor
 			numFrames.Value = film.NumberOfFrames;
 			if (_fView == null || !_fView.Created)
 			{
-				_fView = new frmView(ref _lfd, film.Tag);
+				_fView = new ViewForm(ref _lfd, film.Tag);
 				_fView.Left = Left + Width + 5;
 				_fView.Top = Top;
 				_fView.Show();

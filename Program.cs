@@ -13,7 +13,7 @@ namespace Idmr.TieLayoutEditor
 		{
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			Application.Run(new frmFile());
+			Application.Run(new MainForm());
 		}
 	}
 }

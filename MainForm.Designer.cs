@@ -1,6 +1,6 @@
 ﻿namespace Idmr.TieLayoutEditor
 {
-	partial class frmFile
+	partial class MainForm
 	{
 		/// <summary>
 		/// Required designer variable.
@@ -28,7 +28,7 @@
 		/// </summary>
 		private void InitializeComponent()
 		{
-			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(frmFile));
+			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
 			this.txtFilename = new System.Windows.Forms.TextBox();
 			this.cmdFileOpen = new System.Windows.Forms.Button();
 			this.opnFile = new System.Windows.Forms.OpenFileDialog();
