@@ -28,6 +28,7 @@
 		/// </summary>
 		private void InitializeComponent()
 		{
+			this.components = new System.ComponentModel.Container();
 			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ViewForm));
 			this.lstBlocks = new System.Windows.Forms.ListBox();
 			this.pctView = new System.Windows.Forms.PictureBox();
@@ -39,6 +40,7 @@
 			this.cmdPlayPause = new System.Windows.Forms.Button();
 			this.cmdForward = new System.Windows.Forms.Button();
 			this.cmdEnd = new System.Windows.Forms.Button();
+			this.tmrPlayback = new System.Windows.Forms.Timer(this.components);
 			((System.ComponentModel.ISupportInitialize)(this.pctView)).BeginInit();
 			this.SuspendLayout();
 			// 
@@ -84,6 +86,7 @@
 			this.hsbTime.Name = "hsbTime";
 			this.hsbTime.Size = new System.Drawing.Size(320, 20);
 			this.hsbTime.TabIndex = 4;
+			this.hsbTime.ValueChanged += new System.EventHandler(this.hsbTime_ValueChanged);
 			// 
 			// cmdStart
 			// 
@@ -93,6 +96,7 @@
 			this.cmdStart.TabIndex = 5;
 			this.cmdStart.Text = "|<";
 			this.cmdStart.UseVisualStyleBackColor = true;
+			this.cmdStart.Click += new System.EventHandler(this.cmdStart_Click);
 			// 
 			// cmdBack
 			// 
@@ -109,8 +113,9 @@
 			this.cmdPlayPause.Name = "cmdPlayPause";
 			this.cmdPlayPause.Size = new System.Drawing.Size(27, 23);
 			this.cmdPlayPause.TabIndex = 5;
-			this.cmdPlayPause.Text = "| |";
+			this.cmdPlayPause.Text = ">";
 			this.cmdPlayPause.UseVisualStyleBackColor = true;
+			this.cmdPlayPause.Click += new System.EventHandler(this.cmdPlayPause_Click);
 			// 
 			// cmdForward
 			// 
@@ -130,6 +135,11 @@
 			this.cmdEnd.TabIndex = 5;
 			this.cmdEnd.Text = ">|";
 			this.cmdEnd.UseVisualStyleBackColor = true;
+			// 
+			// tmrPlayback
+			// 
+			this.tmrPlayback.Interval = 83;
+			this.tmrPlayback.Tick += new System.EventHandler(this.tmrPlayback_Tick);
 			// 
 			// ViewForm
 			// 
@@ -170,5 +180,6 @@
 		private System.Windows.Forms.Button cmdPlayPause;
 		private System.Windows.Forms.Button cmdForward;
 		private System.Windows.Forms.Button cmdEnd;
+		private System.Windows.Forms.Timer tmrPlayback;
 	}
 }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -11,7 +12,7 @@ namespace Idmr.TieLayoutEditor
 	public partial class ViewForm : Form
 	{
 		Film _film;
-		LfdFile _lfd;
+		readonly LfdFile _lfd;
 		static LfdFile _tiesfx = null;
 		static LfdFile _tiesfx2 = null;
 		static LfdFile _tiespch = null;
@@ -20,9 +21,12 @@ namespace Idmr.TieLayoutEditor
 		static ColorPalette _empirePalette = null;
 		Bitmap[] _images;
 		int[] _drawOrder;	// determines order of painting bm[]
-		int[,] _imageLocation;	//until I get a better way of doing this, [index,x/y]
+		int[,] _imageLocation;  //until I get a better way of doing this, [index,x/y]
+		short[,] _animation;	// keeps track of which ANIM frames are currently displayed [block, frame/direction/rate]
 		static Delt _stars = null;    // universal background from EMPIRE.LFD
 		int _time;
+		bool _loading;
+		bool _isPlaying;
 
 		// this gets us the required function to play .WAV
 		[DllImport("winmm.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
@@ -32,20 +36,20 @@ namespace Idmr.TieLayoutEditor
 		{
 			//SND_SYNC = 0x0000,  // play synchronously (default) 
 			SND_ASYNC = 0x0001,  // play asynchronously 
-								 //SND_NODEFAULT = 0x0002,  // silence (!default) if sound not found 
+			//SND_NODEFAULT = 0x0002,  // silence (!default) if sound not found 
 			SND_MEMORY = 0x0004,  // pszSound points to a memory file
-								  //SND_LOOP = 0x0008,  // loop the sound until next sndPlaySound 
-								  //SND_NOSTOP = 0x0010,  // don't stop any currently playing sound 
-								  //SND_NOWAIT = 0x00002000, // don't wait if the driver is busy 
-								  //SND_ALIAS = 0x00010000, // name is a registry alias 
-								  //SND_ALIAS_ID = 0x00110000, // alias is a predefined ID
+			//SND_LOOP = 0x0008,  // loop the sound until next sndPlaySound 
+			//SND_NOSTOP = 0x0010,  // don't stop any currently playing sound 
+			//SND_NOWAIT = 0x00002000, // don't wait if the driver is busy 
+			//SND_ALIAS = 0x00010000, // name is a registry alias 
+			//SND_ALIAS_ID = 0x00110000, // alias is a predefined ID
 			SND_FILENAME = 0x00020000, // name is file name 
-									   //SND_RESOURCE = 0x00040004  // name is resource name or atom 
+			//SND_RESOURCE = 0x00040004  // name is resource name or atom 
 		}
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
-			System.Diagnostics.Debug.WriteLine("frmView created");
+			Debug.WriteLine("frmView created");
 			InitializeComponent();
 			Height = 600;
 			_lfd = lfd;
@@ -56,14 +60,14 @@ namespace Idmr.TieLayoutEditor
 
 		public void PaintFilm()
 		{
-			System.Diagnostics.Debug.WriteLine("painting...");
+			Debug.WriteLine("painting...");
 			Bitmap image = new Bitmap(640, 480);
 			Graphics g = Graphics.FromImage(image);
 			for (int i = 0; i < _drawOrder.Length; i++)
 			{
 				if (_drawOrder[i] == -1 || _images[_drawOrder[i]] == null) continue;
 				g.DrawImageUnscaled(_images[_drawOrder[i]], _imageLocation[_drawOrder[i], 0], _imageLocation[_drawOrder[i], 1]);
-				System.Diagnostics.Debug.WriteLine("image drawn: " + lstBlocks.Items[_drawOrder[i]]);
+				Debug.WriteLine("image drawn: " + lstBlocks.Items[_drawOrder[i]]);
 			}
 			pctView.BackColor = Color.Black;
 			pctView.Image = image;
@@ -71,18 +75,19 @@ namespace Idmr.TieLayoutEditor
 		}
 		public void LoadFilm(ref LfdFile lfd, object tag)
 		{
-			System.Diagnostics.Debug.WriteLine("View loading...");
+			Debug.WriteLine("View loading...");
 			_film = (Film)lfd.Resources.GetResourceByTag(tag);
 			lstBlocks.Items.Clear();
 			_palette = _empirePalette;
 			_images = new Bitmap[_film.NumberOfBlocks];
 			_drawOrder = new int[_film.NumberOfBlocks];
 			_imageLocation = new int[_film.NumberOfBlocks, 2];
+			_animation = new short[_film.NumberOfBlocks, 3];
 			#region populate lstBlocks
 			foreach (Film.Block b in _film.Blocks)
 			{
 				string str = b.ToString() + "*";
-				System.Diagnostics.Debug.WriteLine(str);
+				Debug.WriteLine(str);
 				for (int i = 0; i < _lfd.Resources.Count; i++)
 					if (str == (_lfd.Resources[i].ToString() + "*"))
 					{
@@ -118,6 +123,10 @@ namespace Idmr.TieLayoutEditor
 			}
 			#endregion
 
+			_loading = true;	// this prevents double-paint
+			hsbTime.Value = 0;
+			hsbTime.Maximum = _film.NumberOfFrames;
+			_loading = false;
 			updateView();
 			PaintFilm();
 		}
@@ -131,21 +140,21 @@ namespace Idmr.TieLayoutEditor
 			if (img == null)
 				if (lstBlocks.Items[index].ToString() == _stars.ToString() + "*") img = _stars;
 				else return;
-			if (_film.Blocks[index].Chunks[0].Vars[0] != 0) return;	// skip stuff not on first frame
-			System.Diagnostics.Debug.WriteLine("boxing...");
+			if (_film.Blocks[index].Chunks[0].Vars[0] != 0) return; // skip stuff not on first frame
+			Debug.WriteLine("boxing...");
 			Graphics g = pctView.CreateGraphics();
 			Pen pnFrame = new Pen(Color.Red);
 			if (img.Type == Resource.ResourceType.Delt)
 			{
 				Delt d = (Delt)img;
 				g.DrawRectangle(pnFrame, _imageLocation[index, 0], _imageLocation[index, 1], d.Width - 1, d.Height - 1);
-				System.Diagnostics.Debug.WriteLine("L:" + _imageLocation[index, 0] + " T:" + _imageLocation[index, 1] + " W:" + d.Width + " H:" + d.Height);
+				Debug.WriteLine("L:" + _imageLocation[index, 0] + " T:" + _imageLocation[index, 1] + " W:" + d.Width + " H:" + d.Height);
 			}
 			else if (img.Type == Resource.ResourceType.Anim)
 			{
 				Anim a = (Anim)img;
 				g.DrawRectangle(pnFrame, _imageLocation[index, 0], _imageLocation[index, 1], a.Width - 1, a.Height - 1);
-				System.Diagnostics.Debug.WriteLine("L:" + _imageLocation[index, 0] + " T:" + _imageLocation[index, 1] + " W:" + a.Width + " H:" + a.Height);
+				Debug.WriteLine("L:" + _imageLocation[index, 0] + " T:" + _imageLocation[index, 1] + " W:" + a.Width + " H:" + a.Height);
 			}
 			// again, skip CUST for now
 			g.Dispose();
@@ -155,59 +164,36 @@ namespace Idmr.TieLayoutEditor
 		public void PlayWav(int index)
 		{
 			string id = lstBlocks.Items[index].ToString();
-			byte[] wav = null;
-			for (int i = 0; i < _tiesfx.Resources.Count; i++)
-				if (id == (_tiesfx.Resources[i].ToString()))
-				{
-					wav = ((Blas)_tiesfx.Resources[i]).GetWavBytes();
-					break;
-				}
-			if (wav == null)
-				for (int i = 0; i < _tiesfx2.Resources.Count; i++)
-					if (id == (_tiesfx2.Resources[i].ToString()))
-					{
-						wav = ((Blas)_tiesfx2.Resources[i]).GetWavBytes();
-						break;
-					}
-			if (wav == null)
-				for (int i = 0; i < _tiespch.Resources.Count; i++)
-					if (id == (_tiespch.Resources[i].ToString()))
-					{
-						wav = ((Blas)_tiespch.Resources[i]).GetWavBytes();
-						break;
-					}
-			if (wav == null)
-				for (int i = 0; i < _tiespch2.Resources.Count; i++)
-					if (id == (_tiespch2.Resources[i].ToString()))
-					{
-						wav = ((Blas)_tiespch2.Resources[i]).GetWavBytes();
-						break;
-					}
+			Resource res = _tiesfx.Resources[id];
+			if (res == null)
+				res = _tiesfx2.Resources[id];
+			if (res == null)
+				res = _tiespch.Resources[id];
+			if (res == null)
+				res = _tiespch2.Resources[id];
+			if (res == null)
+			{
+				MessageBox.Show("Error: " + id + " not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				return;
+			}
+			byte[] wav = ((Blas)res).GetWavBytes();
 			PlaySound(wav, IntPtr.Zero, SoundFlags.SND_MEMORY | SoundFlags.SND_ASYNC);
 		}
 
 		void loadPltt(string name)
 		{
-			Pltt p = null;
-			for (int i = 0; i < _lfd.Rmap.NumberOfHeaders; i++)
-				if (_lfd.Rmap.SubHeaders[i].Type == Resource.ResourceType.Pltt && _lfd.Rmap.SubHeaders[i].Name == name)
-				{
-					p = (Pltt)_lfd.Resources[i];
-					break;
-				}
-			for (int i = p.StartIndex; i <= p.EndIndex; i++)
-				_palette.Entries[i] = p.Entries[i];
+			Pltt p = (Pltt)_lfd.Resources["PLTT" + name];
+			if (p != null)
+				for (int i = p.StartIndex; i <= p.EndIndex; i++)
+					_palette.Entries[i] = p.Entries[i];
 		}
 		void loadEmpire()
 		{
 			if (_stars != null) return;	// already loaded in, can skip over since it's static
 			string dir = Path.GetDirectoryName(_lfd.FilePath) + "\\";
 			LfdFile empire = new LfdFile(dir + "EMPIRE.LFD");
-			Pltt p = null;
-			// the layout of EMPIRE is known, there's an RMAP also, but I'm doing it this way to prevent using magic numbers
-			for (int i = 0; i < empire.Resources.Count; i++)
-				if (empire.Resources[i].Type == Resource.ResourceType.Pltt) p = (Pltt)empire.Resources[i];	// only 1 PLTT in that file
-				else if (empire.Resources[i].Type == Resource.ResourceType.Delt) _stars = (Delt)empire.Resources[i];	// only 1 DELT
+			Pltt p = (Pltt)empire.Resources["PLTTstandard"];
+			_stars = (Delt)empire.Resources["DELTstars"];
 			_empirePalette = p.Palette;
 			_stars.Palette = _empirePalette;
 			_tiesfx = new LfdFile(dir + "TIESFX.LFD");
@@ -216,6 +202,7 @@ namespace Idmr.TieLayoutEditor
 			_tiespch2 = new LfdFile(dir + "TIESPCH2.LFD");
 		}
 
+		//TODO: really need to work out an Events structure and drive from there, there's too many moving parts to parse everything individually
 		void updateView()
 		{
 			int[] layer = new int[_film.NumberOfBlocks];
@@ -281,13 +268,21 @@ namespace Idmr.TieLayoutEditor
 							Anim a = (Anim)_lfd.Resources[j];
 							a.SetPalette(_palette);
 							a.RelativePosition = true;
-							int frame = 0;
+							int currentTime = -1;
 							foreach (Film.Chunk c in _film.Blocks[block].Chunks)
 							{
-								if (c.Code == Film.Chunk.OpCode.Frame) frame = c.Vars[0];
+								if (currentTime != _time) currentTime = -1;
+
+								if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) currentTime = _time;
+								else if (c.Code == Film.Chunk.OpCode.Frame) _animation[block, 0] = c.Vars[0];
+								else if (c.Code == Film.Chunk.OpCode.Animation)
+								{
+									_animation[block, 1] = c.Vars[0];
+									_animation[block, 2] = c.Vars[1];
+								}
 								else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
 							}
-							_images[block] = (Bitmap)a.Frames[frame].Image.Clone();
+							_images[block] = (Bitmap)a.Frames[_animation[block, 0]].Image.Clone();
 							_images[block].MakeTransparent(Color.Black);
 							_imageLocation[block, 0] = a.Left;
 							_imageLocation[block, 1] = a.Top;
@@ -304,11 +299,11 @@ namespace Idmr.TieLayoutEditor
 					}
 					else if (c.Code == Film.Chunk.OpCode.Window)
 					{
-						System.Diagnostics.Debug.WriteLine("Window code detected: " + _film.Blocks[block].ToString());
+						Debug.WriteLine("Window code detected: " + _film.Blocks[block].ToString());
 					}
 					else if (c.Code == Film.Chunk.OpCode.Shift)
 					{
-						System.Diagnostics.Debug.WriteLine("Shift code detected: " + _film.Blocks[block].ToString());
+						Debug.WriteLine("Shift code detected: " + _film.Blocks[block].ToString());
 					}
 					else if (c.Code == Film.Chunk.OpCode.Orientation && _images[block] != null)
 					{
@@ -317,7 +312,7 @@ namespace Idmr.TieLayoutEditor
 					}
 					else if (c.Code == Film.Chunk.OpCode.Animation)
 					{
-						System.Diagnostics.Debug.WriteLine("Animation code detected: " + _film.Blocks[block].ToString());
+						Debug.WriteLine("Animation code detected: " + _film.Blocks[block].ToString());
 					}
 					else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
 				}
@@ -328,12 +323,15 @@ namespace Idmr.TieLayoutEditor
 			{
 				if (_film.Blocks[b].Type == Film.Block.BlockType.Voic)
 				{
-					// TODO: really need to define an Events structure, otherwise I don't have a way to prevent sounds from firing after their initial frame
-					/*foreach (Film.Chunk c in _film.Blocks[b].Chunks)
+					int currentTime = -1;
+					foreach (Film.Chunk c in _film.Blocks[b].Chunks)
 					{
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
-						else if (c.Code == Film.Chunk.OpCode.Sound || c.Code == Film.Chunk.OpCode.Stereo) PlayWav(b);
-					}*/
+						if (currentTime != _time) currentTime = -1;
+						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) currentTime = _time;
+						else if ((c.Code == Film.Chunk.OpCode.Sound || c.Code == Film.Chunk.OpCode.Stereo) && currentTime == _time && _isPlaying) PlayWav(b);
+						else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
+						else if (c.Code == Film.Chunk.OpCode.Loop) Debug.WriteLine("Loop code detected: " + _film.Blocks[b].ToString());
+					}
 				}
 			}
 		}
@@ -349,10 +347,50 @@ namespace Idmr.TieLayoutEditor
 
 		private void cmdForward_Click(object sender, EventArgs e)
 		{
-			if (_time == _film.NumberOfFrames - 1) return;
-			_time++;
+			if (_time == _film.NumberOfFrames - 1)
+			{
+				_isPlaying = false;
+				tmrPlayback.Stop();
+				cmdPlayPause.Text = ">";
+				return;
+			}
+			hsbTime.Value++;
+		}
+
+		private void tmrPlayback_Tick(object sender, EventArgs e)
+		{
+			cmdForward_Click("tmrPlayback_Tick", new EventArgs());
+		}
+
+		private void cmdPlayPause_Click(object sender, EventArgs e)
+		{
+			if (cmdPlayPause.Text == ">")
+			{
+				cmdPlayPause.Text = "| |";
+				_isPlaying = true;
+				tmrPlayback.Start();
+				updateView();
+				PaintFilm();
+			}
+			else
+			{
+				_isPlaying = false;
+				tmrPlayback.Stop();
+				cmdPlayPause.Text = ">";
+			}
+		}
+
+		private void hsbTime_ValueChanged(object sender, EventArgs e)
+		{
+			_time = hsbTime.Value;
+			if (_loading) return;
 			updateView();
 			PaintFilm();
+		}
+
+		private void cmdStart_Click(object sender, EventArgs e)
+		{
+			hsbTime.Value = 0;
 		}
 	}
 }
