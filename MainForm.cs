@@ -73,9 +73,11 @@ namespace Idmr.TieLayoutEditor
 			numFrames.Value = film.NumberOfFrames;
 			if (_fView == null || !_fView.Created)
 			{
-				_fView = new ViewForm(ref _lfd, film.Tag);
-				_fView.Left = Left + Width + 5;
-				_fView.Top = Top;
+				_fView = new ViewForm(ref _lfd, film.Tag)
+				{
+					Left = Left + Width + 5,
+					Top = Top
+				};
 				_fView.Show();
 			}
 			else _fView.LoadFilm(ref _lfd, film.Tag);

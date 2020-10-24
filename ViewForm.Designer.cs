@@ -162,6 +162,7 @@
 			this.Name = "ViewForm";
 			this.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
 			this.Text = "frmTLE_View";
+			this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.form_FormClosing);
 			((System.ComponentModel.ISupportInitialize)(this.pctView)).EndInit();
 			this.ResumeLayout(false);
 			this.PerformLayout();

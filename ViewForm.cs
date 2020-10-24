@@ -1,11 +1,11 @@
-﻿using System;
+﻿using Idmr.LfdReader;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using Idmr.LfdReader;
 
 namespace Idmr.TieLayoutEditor
 {
@@ -27,25 +27,8 @@ namespace Idmr.TieLayoutEditor
 		int _time;
 		bool _loading;
 		bool _isPlaying;
-
-		// this gets us the required function to play .WAV
-		[DllImport("winmm.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
-		static extern bool PlaySound(byte[] b_ary, IntPtr ptr, SoundFlags sf);      // from memory
-		[Flags]
-		public enum SoundFlags : int
-		{
-			//SND_SYNC = 0x0000,  // play synchronously (default) 
-			SND_ASYNC = 0x0001,  // play asynchronously 
-			//SND_NODEFAULT = 0x0002,  // silence (!default) if sound not found 
-			SND_MEMORY = 0x0004,  // pszSound points to a memory file
-			//SND_LOOP = 0x0008,  // loop the sound until next sndPlaySound 
-			//SND_NOSTOP = 0x0010,  // don't stop any currently playing sound 
-			//SND_NOWAIT = 0x00002000, // don't wait if the driver is busy 
-			//SND_ALIAS = 0x00010000, // name is a registry alias 
-			//SND_ALIAS_ID = 0x00110000, // alias is a predefined ID
-			SND_FILENAME = 0x00020000, // name is file name 
-			//SND_RESOURCE = 0x00040004  // name is resource name or atom 
-		}
+		// this prevents early garbage collection that would cut off the audio early
+		readonly List<System.Windows.Media.MediaPlayer> _activeSounds = new List<System.Windows.Media.MediaPlayer>();
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
@@ -94,32 +77,46 @@ namespace Idmr.TieLayoutEditor
 						str = str.Replace("*", "");	// leaves anything not in the LFD marked, typ VOIC
 						break;
 					}
+				Resource res = null;
 				for (int i = 0; i < _tiesfx.Resources.Count; i++)
 					if (str == (_tiesfx.Resources[i].ToString() + "*"))
 					{
 						str = str.Replace("*", ""); // start finding VOIC
+						res = _tiesfx.Resources[i];
 						break;
 					}
 				for (int i = 0; i < _tiesfx2.Resources.Count; i++)
 					if (str == (_tiesfx2.Resources[i].ToString() + "*"))
 					{
 						str = str.Replace("*", "");
+						res = _tiesfx2.Resources[i];
 						break;
 					}
 				for (int i = 0; i < _tiespch.Resources.Count; i++)
 					if (str == (_tiespch.Resources[i].ToString() + "*"))
 					{
 						str = str.Replace("*", "");
+						res = _tiespch.Resources[i];
 						break;
 					}
 				for (int i = 0; i < _tiespch2.Resources.Count; i++)
 					if (str == (_tiespch2.Resources[i].ToString() + "*"))
 					{
 						str = str.Replace("*", "");
+						res = _tiespch2.Resources[i];
 						break;
 					}
 				if (b.Type == Film.Block.BlockType.View) str = str.Replace("*", "");
 				lstBlocks.Items.Add(str);
+
+				if (res != null)
+				{
+					FileStream fs = new FileStream(Application.StartupPath + "\\temp\\" + res.ToString() + ".wav", FileMode.OpenOrCreate);
+					BinaryWriter bw = new BinaryWriter(fs);
+					bw.Write(((Blas)res).GetWavBytes(false));
+					fs.SetLength(fs.Position);
+					fs.Close();
+				}
 			}
 			#endregion
 
@@ -164,20 +161,20 @@ namespace Idmr.TieLayoutEditor
 		public void PlayWav(int index)
 		{
 			string id = lstBlocks.Items[index].ToString();
-			Resource res = _tiesfx.Resources[id];
-			if (res == null)
-				res = _tiesfx2.Resources[id];
-			if (res == null)
-				res = _tiespch.Resources[id];
-			if (res == null)
-				res = _tiespch2.Resources[id];
-			if (res == null)
+			var plr = new System.Windows.Media.MediaPlayer();
+			plr.MediaEnded += mediaPlayer_MediaEnded;
+			_activeSounds.Add(plr);
+			try
 			{
-				MessageBox.Show("Error: " + id + " not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-				return;
+				plr.Open(new Uri(Application.StartupPath + "\\temp\\" + id + ".wav"));
+				plr.Play();
 			}
-			byte[] wav = ((Blas)res).GetWavBytes();
-			PlaySound(wav, IntPtr.Zero, SoundFlags.SND_MEMORY | SoundFlags.SND_ASYNC);
+			catch { }
+		}
+
+		private void mediaPlayer_MediaEnded(object sender, EventArgs e)
+		{
+			_activeSounds.Remove((System.Windows.Media.MediaPlayer)sender);
 		}
 
 		void loadPltt(string name)
@@ -391,6 +388,12 @@ namespace Idmr.TieLayoutEditor
 		private void cmdStart_Click(object sender, EventArgs e)
 		{
 			hsbTime.Value = 0;
+		}
+
+		private void form_FormClosing(object sender, FormClosingEventArgs e)
+		{
+			string[] files = Directory.GetFiles(Application.StartupPath + "\\temp\\");
+			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
 		}
 	}
 }
