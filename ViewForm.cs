@@ -28,7 +28,9 @@ namespace Idmr.TieLayoutEditor
 		bool _loading;
 		bool _isPlaying;
 		// this prevents early garbage collection that would cut off the audio early
+		// also, I'm not declaring the using since it causes class name conflicts within Drawing
 		readonly List<System.Windows.Media.MediaPlayer> _activeSounds = new List<System.Windows.Media.MediaPlayer>();
+		readonly List<Event> _events = new List<Event>();
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
@@ -43,14 +45,14 @@ namespace Idmr.TieLayoutEditor
 
 		public void PaintFilm()
 		{
-			Debug.WriteLine("painting...");
+			//Debug.WriteLine("painting...");
 			Bitmap image = new Bitmap(640, 480);
 			Graphics g = Graphics.FromImage(image);
 			for (int i = 0; i < _drawOrder.Length; i++)
 			{
 				if (_drawOrder[i] == -1 || _images[_drawOrder[i]] == null) continue;
 				g.DrawImageUnscaled(_images[_drawOrder[i]], _imageLocation[_drawOrder[i], 0], _imageLocation[_drawOrder[i], 1]);
-				Debug.WriteLine("image drawn: " + lstBlocks.Items[_drawOrder[i]]);
+				//Debug.WriteLine("image drawn: " + lstBlocks.Items[_drawOrder[i]]);
 			}
 			pctView.BackColor = Color.Black;
 			pctView.Image = image;
@@ -111,15 +113,21 @@ namespace Idmr.TieLayoutEditor
 
 				if (res != null)
 				{
-					FileStream fs = new FileStream(Application.StartupPath + "\\temp\\" + res.ToString() + ".wav", FileMode.OpenOrCreate);
-					BinaryWriter bw = new BinaryWriter(fs);
-					bw.Write(((Blas)res).GetWavBytes(false));
-					fs.SetLength(fs.Position);
-					fs.Close();
+					if (!Directory.Exists(MainForm._tempDir)) Directory.CreateDirectory(MainForm._tempDir);
+					using (FileStream fs = new FileStream(MainForm._tempDir + res.ToString() + ".wav", FileMode.OpenOrCreate))
+					{
+						using (BinaryWriter bw = new BinaryWriter(fs))
+						{
+							Blas blas = (Blas)res;
+							if (blas.SoundBlocks[0].NumberOfRepeats > -1) bw.Write(blas.GetWavBytes(true));
+							else bw.Write(blas.GetWavBytes(false));
+							fs.SetLength(fs.Position);
+						}
+					}
 				}
 			}
 			#endregion
-
+			buildEvents();
 			_loading = true;	// this prevents double-paint
 			hsbTime.Value = 0;
 			hsbTime.Maximum = _film.NumberOfFrames;
@@ -163,11 +171,11 @@ namespace Idmr.TieLayoutEditor
 			string id = lstBlocks.Items[index].ToString();
 			var plr = new System.Windows.Media.MediaPlayer();
 			plr.MediaEnded += mediaPlayer_MediaEnded;
-			_activeSounds.Add(plr);
 			try
 			{
-				plr.Open(new Uri(Application.StartupPath + "\\temp\\" + id + ".wav"));
+				plr.Open(new Uri(MainForm._tempDir + id + ".wav"));
 				plr.Play();
+				_activeSounds.Add(plr);
 			}
 			catch { }
 		}
@@ -175,6 +183,37 @@ namespace Idmr.TieLayoutEditor
 		private void mediaPlayer_MediaEnded(object sender, EventArgs e)
 		{
 			_activeSounds.Remove((System.Windows.Media.MediaPlayer)sender);
+			// TODO: Maybe do a Dictionary instead? Could tie the MP to the index of the FILM, then from here back out the index to handle repeats
+			// would need a new way to call Stop() during PlayPause
+		}
+
+		void buildEvents()
+		{
+			_events.Clear();
+			// TODO: buildEvents()
+			for (short t = 0; t < _film.NumberOfFrames; t++)
+			{
+				for (int b = 0; b < _film.NumberOfBlocks; b++)
+				{
+					for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
+					{
+						Film.Chunk c = _film.Blocks[b].Chunks[chunk];
+						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] <= t) continue;	// LE since there's no other processing for EQ
+						if (c.Code == Film.Chunk.OpCode.End || (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > t)) break;
+
+						if (_film.Blocks[b].Type == Film.Block.BlockType.Pltt && c.Code == Film.Chunk.OpCode.Use)
+						{
+							Event pal = new Event
+							{
+								Time = t,
+								Block = _film.Blocks[b],
+								LoadPalette = true
+							};
+							_events.Add(pal);
+						}
+					}
+				}
+			}
 		}
 
 		void loadPltt(string name)
@@ -199,7 +238,6 @@ namespace Idmr.TieLayoutEditor
 			_tiespch2 = new LfdFile(dir + "TIESPCH2.LFD");
 		}
 
-		//TODO: really need to work out an Events structure and drive from there, there's too many moving parts to parse everything individually
 		void updateView()
 		{
 			int[] layer = new int[_film.NumberOfBlocks];
@@ -374,6 +412,7 @@ namespace Idmr.TieLayoutEditor
 				_isPlaying = false;
 				tmrPlayback.Stop();
 				cmdPlayPause.Text = ">";
+				for (int i = 0; i < _activeSounds.Count; i++) _activeSounds[i].Stop();
 			}
 		}
 
@@ -392,8 +431,38 @@ namespace Idmr.TieLayoutEditor
 
 		private void form_FormClosing(object sender, FormClosingEventArgs e)
 		{
-			string[] files = Directory.GetFiles(Application.StartupPath + "\\temp\\");
+			if (!Directory.Exists(MainForm._tempDir)) return;
+			string[] files = Directory.GetFiles(MainForm._tempDir);
 			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
+		}
+
+		public struct Event
+		{
+			public short Time;
+			public Film.Block Block;
+			public Film.Chunk.OpCode OpCode;
+			public short[] Vars;
+
+			// View
+			public short ViewTransition;
+			public short ViewParameter;
+
+			// Images
+			public bool Display;
+			public short X;
+			public short Y;
+			public short XRate;
+			public short YRate;
+			public bool Animate;
+			public short Framerate;
+
+			// Palette
+			public bool LoadPalette;	// not really necessary, since the PLTT event won't be created if false
+
+			// Audio
+			public short LoopCount;
+			public short Volume;
+			public short Balance;
 		}
 	}
 }

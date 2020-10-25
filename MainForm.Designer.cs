@@ -239,7 +239,7 @@
 			this.cmdSave.UseVisualStyleBackColor = true;
 			this.cmdSave.Click += new System.EventHandler(this.cmdSave_Click);
 			// 
-			// frmTLE_File
+			// MainForm
 			// 
 			this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -256,9 +256,10 @@
 			this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
 			this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
 			this.MaximizeBox = false;
-			this.Name = "frmTLE_File";
+			this.Name = "MainForm";
 			this.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
 			this.Text = "TIE Layout Editor";
+			this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.form_FormClosing);
 			this.grpFILM.ResumeLayout(false);
 			this.grpFILM.PerformLayout();
 			((System.ComponentModel.ISupportInitialize)(this.numBlocks)).EndInit();

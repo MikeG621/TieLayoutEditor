@@ -10,6 +10,7 @@ namespace Idmr.TieLayoutEditor
 		string _filePath = "";
 		ViewForm _fView = null;
 		LfdFile _lfd;
+		internal static readonly string _tempDir = Application.StartupPath + "\\temp\\";
 
 		public MainForm()
 		{
@@ -19,7 +20,7 @@ namespace Idmr.TieLayoutEditor
 			Top = 100;
 		}
 
-		private void FileOpen()
+		private void fileOpen()
 		{
 			FileStream stream = null;
 			try
@@ -57,11 +58,11 @@ namespace Idmr.TieLayoutEditor
 		{
 			txtFilename.Text = opnFile.FileName;
 			if (_fView != null && _fView.Created) _fView.Close();
-			FileOpen();
+			fileOpen();
 		}
 		private void txtFilename_KeyPress(object sender, KeyPressEventArgs e)
 		{
-			if (Convert.ToInt32(e.KeyChar) == 13) FileOpen();
+			if (Convert.ToInt32(e.KeyChar) == 13) fileOpen();
 		}
 		private void cmdLoad_Click(object sender, EventArgs e)
 		{
@@ -85,6 +86,13 @@ namespace Idmr.TieLayoutEditor
 		private void cmdSave_Click(object sender, EventArgs e)
 		{
 			// TODO: save FILM
+		}
+
+		private void form_FormClosing(object sender, FormClosingEventArgs e)
+		{
+			if (!Directory.Exists(_tempDir)) return;
+			string[] files = Directory.GetFiles(_tempDir);
+			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
 		}
 	}
 }
