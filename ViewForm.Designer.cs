@@ -41,6 +41,7 @@
 			this.cmdForward = new System.Windows.Forms.Button();
 			this.cmdEnd = new System.Windows.Forms.Button();
 			this.tmrPlayback = new System.Windows.Forms.Timer(this.components);
+			this.lblTime = new System.Windows.Forms.Label();
 			((System.ComponentModel.ISupportInitialize)(this.pctView)).BeginInit();
 			this.SuspendLayout();
 			// 
@@ -141,11 +142,21 @@
 			this.tmrPlayback.Interval = 83;
 			this.tmrPlayback.Tick += new System.EventHandler(this.tmrPlayback_Tick);
 			// 
+			// lblTime
+			// 
+			this.lblTime.AutoSize = true;
+			this.lblTime.Location = new System.Drawing.Point(453, 544);
+			this.lblTime.Name = "lblTime";
+			this.lblTime.Size = new System.Drawing.Size(35, 13);
+			this.lblTime.TabIndex = 6;
+			this.lblTime.Text = "label3";
+			// 
 			// ViewForm
 			// 
 			this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
 			this.ClientSize = new System.Drawing.Size(774, 570);
+			this.Controls.Add(this.lblTime);
 			this.Controls.Add(this.cmdEnd);
 			this.Controls.Add(this.cmdForward);
 			this.Controls.Add(this.cmdPlayPause);
@@ -182,5 +193,6 @@
 		private System.Windows.Forms.Button cmdForward;
 		private System.Windows.Forms.Button cmdEnd;
 		private System.Windows.Forms.Timer tmrPlayback;
+		private System.Windows.Forms.Label lblTime;
 	}
 }

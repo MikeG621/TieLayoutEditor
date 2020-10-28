@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Windows.Forms;
+using TIE_Layout_Editor;
 
 namespace Idmr.TieLayoutEditor
 {
@@ -31,6 +32,7 @@ namespace Idmr.TieLayoutEditor
 		// also, I'm not declaring the using since it causes class name conflicts within Drawing
 		readonly List<System.Windows.Media.MediaPlayer> _activeSounds = new List<System.Windows.Media.MediaPlayer>();
 		readonly List<Event> _events = new List<Event>();
+		EventForm _fEvent = null;
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
@@ -114,16 +116,17 @@ namespace Idmr.TieLayoutEditor
 				if (res != null)
 				{
 					if (!Directory.Exists(MainForm._tempDir)) Directory.CreateDirectory(MainForm._tempDir);
-					using (FileStream fs = new FileStream(MainForm._tempDir + res.ToString() + ".wav", FileMode.OpenOrCreate))
-					{
-						using (BinaryWriter bw = new BinaryWriter(fs))
+					if (!File.Exists(MainForm._tempDir + res.ToString() + ".wav"))
+						using (FileStream fs = new FileStream(MainForm._tempDir + res.ToString() + ".wav", FileMode.OpenOrCreate))
 						{
-							Blas blas = (Blas)res;
-							if (blas.SoundBlocks[0].NumberOfRepeats > -1) bw.Write(blas.GetWavBytes(true));
-							else bw.Write(blas.GetWavBytes(false));
-							fs.SetLength(fs.Position);
+							using (BinaryWriter bw = new BinaryWriter(fs))
+							{
+								Blas blas = (Blas)res;
+								if (blas.SoundBlocks[0].NumberOfRepeats > -1) bw.Write(blas.GetWavBytes(true));
+								else bw.Write(blas.GetWavBytes(false));
+								fs.SetLength(fs.Position);
+							}
 						}
-					}
 				}
 			}
 			#endregion
@@ -164,11 +167,16 @@ namespace Idmr.TieLayoutEditor
 			// again, skip CUST for now
 			g.Dispose();
 		}
-		/// <summary>Play the audio resource</summary>
-		/// <param name="index">Block index</param>
-		public void PlayWav(int index)
+		void playWav(int blockIndex)
 		{
-			string id = lstBlocks.Items[index].ToString();
+			playWav(lstBlocks.Items[blockIndex].ToString());
+		}
+		void playWav(Film.Block block)
+		{
+			playWav(block.ToString());
+		}
+		void playWav(string id)
+		{
 			var plr = new System.Windows.Media.MediaPlayer();
 			plr.MediaEnded += mediaPlayer_MediaEnded;
 			try
@@ -195,13 +203,29 @@ namespace Idmr.TieLayoutEditor
 			{
 				for (int b = 0; b < _film.NumberOfBlocks; b++)
 				{
+					short time = 0;
 					for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
 					{
 						Film.Chunk c = _film.Blocks[b].Chunks[chunk];
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] <= t) continue;	// LE since there's no other processing for EQ
-						if (c.Code == Film.Chunk.OpCode.End || (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > t)) break;
+						if (c.Code == Film.Chunk.OpCode.Time) time = c.Vars[0];
+						if (time < t) continue;
+						if ((c.Code == Film.Chunk.OpCode.End) || (time > t)) break;
 
-						if (_film.Blocks[b].Type == Film.Block.BlockType.Pltt && c.Code == Film.Chunk.OpCode.Use)
+						if (_film.Blocks[b].Type == Film.Block.BlockType.View && c.Code == Film.Chunk.OpCode.Transition)
+						{
+							Event view = new Event
+							{
+								Time = t,
+								Block = _film.Blocks[b],
+								ViewTransition = c.Vars[0],
+								ViewParameter = c.Vars[1]
+							};
+							_events.Add(view);
+						}
+
+						// image
+
+						else if (_film.Blocks[b].Type == Film.Block.BlockType.Pltt && c.Code == Film.Chunk.OpCode.Use)
 						{
 							Event pal = new Event
 							{
@@ -210,6 +234,50 @@ namespace Idmr.TieLayoutEditor
 								LoadPalette = true
 							};
 							_events.Add(pal);
+						}
+
+						else if (_film.Blocks[b].Type == Film.Block.BlockType.Voic && c.Code != Film.Chunk.OpCode.Preload)  // don't need Preload, we've already done it
+						{
+							if (c.Code == Film.Chunk.OpCode.Sound)
+							{
+								//simple sounds, OnOff/Vol/FadeVar?/FadeVar
+								if (c.Vars[0] == 1)
+								{
+									// new event
+									Event sound = new Event
+									{
+										Time = t,
+										Block = _film.Blocks[b],
+										Volume = c.Vars[1]
+									};
+									// TODO: looping
+									_events.Add(sound);
+								}
+								else if (c.Vars[0] == 0)
+								{
+									// modify existing event
+								}
+							}
+							else if (c.Code == Film.Chunk.OpCode.Stereo)
+							{
+								//adv sound, OnOff/Vol///Balance/FadeVar/FadeVar
+								if (c.Vars[0] == 1)
+								{
+									// new event
+									Event stereo = new Event
+									{
+										Time = t,
+										Block = _film.Blocks[b],
+										Volume = c.Vars[1],
+										Balance = c.Vars[4]
+									};
+									_events.Add(stereo);
+								}
+								else if (c.Vars[0] == 0)
+								{
+									// modify existing event
+								}
+							}
 						}
 					}
 				}
@@ -363,7 +431,7 @@ namespace Idmr.TieLayoutEditor
 					{
 						if (currentTime != _time) currentTime = -1;
 						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) currentTime = _time;
-						else if ((c.Code == Film.Chunk.OpCode.Sound || c.Code == Film.Chunk.OpCode.Stereo) && currentTime == _time && _isPlaying) PlayWav(b);
+						else if ((c.Code == Film.Chunk.OpCode.Sound || c.Code == Film.Chunk.OpCode.Stereo) && c.Vars[0] == 1 && currentTime == _time && _isPlaying) playWav(b);
 						else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
 						else if (c.Code == Film.Chunk.OpCode.Loop) Debug.WriteLine("Loop code detected: " + _film.Blocks[b].ToString());
 					}
@@ -376,8 +444,15 @@ namespace Idmr.TieLayoutEditor
 		{
 			pctView.Refresh();
 			if (_film.Blocks[lstBlocks.SelectedIndex].TypeNum == 3) BoxImage(lstBlocks.SelectedIndex);
-			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) PlayWav(lstBlocks.SelectedIndex);
-			// TODO: import to frmTLE_Events
+			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) playWav(lstBlocks.SelectedIndex);
+			if (_fEvent == null || !_fEvent.Created)
+			{
+				_fEvent = new EventForm(ref _film.Blocks[lstBlocks.SelectedIndex]);
+				_fEvent.Show();
+				_fEvent.Left = Left + Width + 5;
+				_fEvent.Top = Top;
+			}
+			else _fEvent.LoadBlock(ref _film.Blocks[lstBlocks.SelectedIndex]);
 		}
 
 		private void cmdForward_Click(object sender, EventArgs e)
@@ -419,6 +494,7 @@ namespace Idmr.TieLayoutEditor
 		private void hsbTime_ValueChanged(object sender, EventArgs e)
 		{
 			_time = hsbTime.Value;
+			lblTime.Text = _time.ToString("x4");
 			if (_loading) return;
 			updateView();
 			PaintFilm();
