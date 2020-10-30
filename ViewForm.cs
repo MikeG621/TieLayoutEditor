@@ -148,7 +148,7 @@ namespace Idmr.TieLayoutEditor
 			if (img == null)
 				if (lstBlocks.Items[index].ToString() == _stars.ToString() + "*") img = _stars;
 				else return;
-			if (_film.Blocks[index].Chunks[0].Vars[0] != 0) return; // skip stuff not on first frame
+			if (_film.Blocks[index].Chunks[0].Code == Film.Chunk.OpCode.End || _film.Blocks[index].Chunks[0].Vars[0] != 0) return; // skip stuff not on first frame
 			Debug.WriteLine("boxing...");
 			Graphics g = pctView.CreateGraphics();
 			Pen pnFrame = new Pen(Color.Red);
@@ -182,6 +182,7 @@ namespace Idmr.TieLayoutEditor
 			try
 			{
 				plr.Open(new Uri(MainForm._tempDir + id + ".wav"));
+				// plr.Volume is 0-1, default is .5
 				plr.Play();
 				_activeSounds.Add(plr);
 			}
@@ -204,89 +205,142 @@ namespace Idmr.TieLayoutEditor
 				for (int b = 0; b < _film.NumberOfBlocks; b++)
 				{
 					short time = 0;
-					for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
+					if (_film.Blocks[b].TypeNum != 3)
+						for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
+						{
+							Film.Chunk c = _film.Blocks[b].Chunks[chunk];
+							if (c.Code == Film.Chunk.OpCode.Time) time = c.Vars[0];
+							if (time < t) continue;
+							if ((c.Code == Film.Chunk.OpCode.End) || (time > t)) break;
+
+							if (_film.Blocks[b].Type == Film.Block.BlockType.View && c.Code == Film.Chunk.OpCode.Transition)
+							{
+								Event view = new Event
+								{
+									Time = t,
+									Block = _film.Blocks[b],
+									ViewTransition = c.Vars[0],
+									ViewParameter = c.Vars[1]
+								};
+								_events.Add(view);
+							}
+
+							else if (_film.Blocks[b].Type == Film.Block.BlockType.Pltt && c.Code == Film.Chunk.OpCode.Use)
+							{
+								Event pal = new Event
+								{
+									Time = t,
+									Block = _film.Blocks[b],
+									LoadPalette = true
+								};
+								_events.Add(pal);
+							}
+
+							else if (_film.Blocks[b].Type == Film.Block.BlockType.Voic && c.Code != Film.Chunk.OpCode.Preload)  // don't need Preload, we've already done it
+							{
+								if (c.Code == Film.Chunk.OpCode.Sound)
+								{
+									//simple sounds, OnOff/Vol/FadeVar?/FadeVar
+									if (c.Vars[0] == 1)
+									{
+										// new event
+										Event sound = new Event
+										{
+											Time = t,
+											Block = _film.Blocks[b],
+											Volume = c.Vars[1]
+										};
+										// TODO: looping
+										_events.Add(sound);
+									}
+									else if (c.Vars[0] == 0)
+									{
+										// modify existing event
+									}
+								}
+								else if (c.Code == Film.Chunk.OpCode.Stereo)
+								{
+									//adv sound, OnOff/Vol///Balance/FadeVar/FadeVar
+									if (c.Vars[0] == 1)
+									{
+										// new event
+										Event stereo = new Event
+										{
+											Time = t,
+											Block = _film.Blocks[b],
+											Volume = c.Vars[1],
+											Balance = c.Vars[4]
+										};
+										_events.Add(stereo);
+									}
+									else if (c.Vars[0] == 0)
+									{
+										// modify existing event
+									}
+								}
+							}
+						}
+					else
 					{
-						Film.Chunk c = _film.Blocks[b].Chunks[chunk];
-						if (c.Code == Film.Chunk.OpCode.Time) time = c.Vars[0];
-						if (time < t) continue;
-						if ((c.Code == Film.Chunk.OpCode.End) || (time > t)) break;
+						// these are split out due to multiple chunks needing to be processed for a single event
+						if (_film.Blocks[b].Type == Film.Block.BlockType.Cust || _film.Blocks[b].Chunks[0].Code == Film.Chunk.OpCode.End) continue;
+						// there will be special cases like REGISTER where the door has no chunks, but is triggered by the EXE
 
-						if (_film.Blocks[b].Type == Film.Block.BlockType.View && c.Code == Film.Chunk.OpCode.Transition)
+						Event image = new Event();
+						image.Block = _film.Blocks[b];
+						for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
 						{
-							Event view = new Event
-							{
-								Time = t,
-								Block = _film.Blocks[b],
-								ViewTransition = c.Vars[0],
-								ViewParameter = c.Vars[1]
-							};
-							_events.Add(view);
-						}
+							Film.Chunk c = _film.Blocks[b].Chunks[chunk];
+							if (c.Code == Film.Chunk.OpCode.Time) time = c.Vars[0];
+							if (time < t) continue;
+							if ((c.Code == Film.Chunk.OpCode.End) || (time > t)) break;
 
-						// image
-
-						else if (_film.Blocks[b].Type == Film.Block.BlockType.Pltt && c.Code == Film.Chunk.OpCode.Use)
-						{
-							Event pal = new Event
+							if (c.Code == Film.Chunk.OpCode.Move)
 							{
-								Time = t,
-								Block = _film.Blocks[b],
-								LoadPalette = true
-							};
-							_events.Add(pal);
-						}
-
-						else if (_film.Blocks[b].Type == Film.Block.BlockType.Voic && c.Code != Film.Chunk.OpCode.Preload)  // don't need Preload, we've already done it
-						{
-							if (c.Code == Film.Chunk.OpCode.Sound)
-							{
-								//simple sounds, OnOff/Vol/FadeVar?/FadeVar
-								if (c.Vars[0] == 1)
-								{
-									// new event
-									Event sound = new Event
-									{
-										Time = t,
-										Block = _film.Blocks[b],
-										Volume = c.Vars[1]
-									};
-									// TODO: looping
-									_events.Add(sound);
-								}
-								else if (c.Vars[0] == 0)
-								{
-									// modify existing event
-								}
+								image.X = c.Vars[0];
+								image.Y = c.Vars[1];
 							}
-							else if (c.Code == Film.Chunk.OpCode.Stereo)
+							else if (c.Code == Film.Chunk.OpCode.Speed)
 							{
-								//adv sound, OnOff/Vol///Balance/FadeVar/FadeVar
-								if (c.Vars[0] == 1)
-								{
-									// new event
-									Event stereo = new Event
-									{
-										Time = t,
-										Block = _film.Blocks[b],
-										Volume = c.Vars[1],
-										Balance = c.Vars[4]
-									};
-									_events.Add(stereo);
-								}
-								else if (c.Vars[0] == 0)
-								{
-									// modify existing event
-								}
+								image.XRate = c.Vars[0];
+								image.YRate = c.Vars[1];
 							}
+							else if (c.Code == Film.Chunk.OpCode.Layer) image.Layer = c.Vars[0];
+							else if (c.Code == Film.Chunk.OpCode.Frame && image.Block.Type == Film.Block.BlockType.Anim)
+							{
+								// for some reason there's DELTs with this assigned, which shouldn't do anything
+								image.Frame = c.Vars[0];
+							}
+							else if (c.Code == Film.Chunk.OpCode.Animation)
+							{
+								image.Animate = (c.Vars[0] != 0);
+								image.Framerate = c.Vars[1];
+							}
+							// skip Event and Region
+							else if (c.Code == Film.Chunk.OpCode.Window)
+							{
+								image.Left = c.Vars[0];
+								image.Top = c.Vars[1];
+								image.Right = c.Vars[2];
+								image.Bottom = c.Vars[3];
+							}
+							// skip Shift for now, need to find examples
+							else if (c.Code == Film.Chunk.OpCode.Orientation)
+							{
+								image.FlipX = (c.Vars[0] == 1);
+								image.FlipY = (c.Vars[1] == 1);
+							}
+							else if (c.Code == Film.Chunk.OpCode.Display) image.Display = (c.Vars[0] == 1);
 						}
+						_events.Add(image);
 					}
 				}
 			}
 		}
 
-		void loadPltt(string name)
+		void loadPltt(string id)
 		{
-			Pltt p = (Pltt)_lfd.Resources["PLTT" + name];
+			Pltt p = (Pltt)_lfd.Resources[id];
 			if (p != null)
 				for (int i = p.StartIndex; i <= p.EndIndex; i++)
 					_palette.Entries[i] = p.Entries[i];
@@ -306,6 +360,15 @@ namespace Idmr.TieLayoutEditor
 			_tiespch2 = new LfdFile(dir + "TIESPCH2.LFD");
 		}
 
+		void performEvents()
+		{
+			//TODO: event processing
+			// at current time only, load PLTT
+			// determine layer order and sort
+			// draw images, including frames and Move codes
+			// audio, including looping
+		}
+
 		void updateView()
 		{
 			int[] layer = new int[_film.NumberOfBlocks];
@@ -315,7 +378,7 @@ namespace Idmr.TieLayoutEditor
 				string str = lstBlocks.Items[b].ToString();
 				if (str.StartsWith("PLTT") && str.IndexOf("*") == -1)
 					foreach (Film.Chunk c in _film.Blocks[b].Chunks)
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] <= _time) loadPltt(_film.Blocks[b].Name);
+						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] <= _time) loadPltt(_film.Blocks[b].ToString());
 
 				layer[b] = -2527;   // there are negative layers in a few cases, need to make room for them
 				if (_film.Blocks[b].TypeNum == 3)
@@ -510,6 +573,7 @@ namespace Idmr.TieLayoutEditor
 			if (!Directory.Exists(MainForm._tempDir)) return;
 			string[] files = Directory.GetFiles(MainForm._tempDir);
 			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
+			if (_fEvent != null) _fEvent.Close();
 		}
 
 		public struct Event
@@ -525,12 +589,20 @@ namespace Idmr.TieLayoutEditor
 
 			// Images
 			public bool Display;
+			public short Layer;
 			public short X;
 			public short Y;
 			public short XRate;
 			public short YRate;
 			public bool Animate;
+			public short Frame;
 			public short Framerate;
+			public short Left;
+			public short Top;
+			public short Right;
+			public short Bottom;
+			public bool FlipX;
+			public bool FlipY;
 
 			// Palette
 			public bool LoadPalette;	// not really necessary, since the PLTT event won't be created if false
