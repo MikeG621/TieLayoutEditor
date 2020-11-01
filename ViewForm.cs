@@ -1,6 +1,7 @@
 ﻿using Idmr.LfdReader;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -39,20 +40,22 @@ namespace Idmr.TieLayoutEditor
 			Height = 600;
 			_lfd = lfd;
 			loadEmpire();
-			_palette = _empirePalette;
+			Bitmap t = new Bitmap(1, 1, PixelFormat.Format8bppIndexed);
+			_palette = t.Palette;
+			t.Dispose();
+			for (int c = 0; c < 256; c++) _palette.Entries[c] = _empirePalette.Entries[c]; // this ensures _empire isn't modified
 			LoadFilm(ref lfd, tag);
 		}
 
 		public void PaintFilm()
 		{
-			//Debug.WriteLine("painting...");
 			Bitmap image = new Bitmap(640, 480);
 			Graphics g = Graphics.FromImage(image);
 			for (int i = 0; i < _drawOrder.Length; i++)
 			{
 				if (_drawOrder[i] == -1 || _images[_drawOrder[i]].ProcessedImage == null) continue;
+				// TODO: Windows; DrawImageUnscaledAndClipped
 				g.DrawImageUnscaled(_images[_drawOrder[i]].ProcessedImage, _images[_drawOrder[i]].X, _images[_drawOrder[i]].Y);
-				//Debug.WriteLine("image drawn: " + lstBlocks.Items[_drawOrder[i]]);
 			}
 			pctView.BackColor = Color.Black;
 			pctView.Image = image;
@@ -63,7 +66,7 @@ namespace Idmr.TieLayoutEditor
 			Debug.WriteLine("View loading...");
 			_film = (Film)lfd.Resources.GetResourceByTag(tag);
 			lstBlocks.Items.Clear();
-			_palette = _empirePalette;
+			for (int c = 0; c < 256; c++) _palette.Entries[c] = _empirePalette.Entries[c];
 			_drawOrder = new short[_film.NumberOfBlocks];
 			_images = new Image[_film.NumberOfBlocks];
 			#region populate lstBlocks
@@ -131,7 +134,7 @@ namespace Idmr.TieLayoutEditor
 			hsbTime.Value = 0;
 			hsbTime.Maximum = _film.NumberOfFrames;
 			_loading = false;
-			updateView();
+			performEvents();
 			PaintFilm();
 		}
 		/// <summary>Paint a box around the extents of the image</summary>
@@ -164,22 +167,23 @@ namespace Idmr.TieLayoutEditor
 			// again, skip CUST for now
 			g.Dispose();
 		}
-		void playWav(int blockIndex)
+		void playWav(int blockIndex, short volume, short balance)
 		{
-			playWav(lstBlocks.Items[blockIndex].ToString());
+			playWav(lstBlocks.Items[blockIndex].ToString(), volume, balance);
 		}
-		void playWav(Film.Block block)
+		void playWav(Film.Block block, short volume, short balance)
 		{
-			playWav(block.ToString());
+			playWav(block.ToString(), volume, balance);
 		}
-		void playWav(string id)
+		void playWav(string id, short volume, short balance)
 		{
 			var plr = new System.Windows.Media.MediaPlayer();
 			plr.MediaEnded += mediaPlayer_MediaEnded;
 			try
 			{
 				plr.Open(new Uri(MainForm._tempDir + id + ".wav"));
-				// plr.Volume is 0-1, default is .5
+				plr.Volume = (volume == 0 ? 100 : volume) * 0.5 / 100;
+				plr.Balance = (double)((balance == 0 ? 64 : balance) - 64) / 63;
 				plr.Play();
 				_activeSounds.Add(plr);
 			}
@@ -236,7 +240,7 @@ namespace Idmr.TieLayoutEditor
 							{
 								if (c.Code == Film.Chunk.OpCode.Sound)
 								{
-									//simple sounds, OnOff/Vol/FadeVar?/FadeVar
+									//simple sounds, OnOff/Vol//?
 									if (c.Vars[0] == 1)
 									{
 										// new event
@@ -252,12 +256,12 @@ namespace Idmr.TieLayoutEditor
 									}
 									else if (c.Vars[0] == 0)
 									{
-										// modify existing event
+										// modify existing event, unk
 									}
 								}
 								else if (c.Code == Film.Chunk.OpCode.Stereo)
 								{
-									//adv sound, OnOff/Vol///Balance/FadeVar/FadeVar
+									//adv sound, OnOff/Vol///Balance/?/?
 									if (c.Vars[0] == 1)
 									{
 										// new event
@@ -265,6 +269,7 @@ namespace Idmr.TieLayoutEditor
 										{
 											Time = t,
 											BlockIndex = b,
+											Start = true,
 											Volume = c.Vars[1],
 											Balance = c.Vars[4]
 										};
@@ -272,7 +277,7 @@ namespace Idmr.TieLayoutEditor
 									}
 									else if (c.Vars[0] == 0)
 									{
-										// modify existing event
+										// modify existing event, unk
 									}
 								}
 							}
@@ -284,12 +289,16 @@ namespace Idmr.TieLayoutEditor
 						// there will be special cases like REGISTER where the door has no chunks, but is triggered by the EXE
 
 						Event image = new Event { BlockIndex = b };
+						image.Frame = -1;   // this'll get reset if explicitly set, otherwise use defaults'
+						image.Time = -1;
+
 						for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
 						{
 							Film.Chunk c = _film.Blocks[b].Chunks[chunk];
 							if (c.Code == Film.Chunk.OpCode.Time) time = c.Vars[0];
 							if (time < t) continue;
 							if ((c.Code == Film.Chunk.OpCode.End) || (time > t)) break;
+							image.Time = time;
 
 							if (c.Code == Film.Chunk.OpCode.Move)
 							{
@@ -309,9 +318,8 @@ namespace Idmr.TieLayoutEditor
 							}
 							else if (c.Code == Film.Chunk.OpCode.Animation)
 							{
-								// TODO: this can't be right. c.V[0] can be -1, 0 or 1. c.V[1] has a range, but default is 0
-								image.Animate = (c.Vars[0] != 0);
-								image.Framerate = c.Vars[1];
+								// TODO: work out c.V[1]
+								image.Framerate = c.Vars[0];
 							}
 							// skip Event and Region
 							else if (c.Code == Film.Chunk.OpCode.Window)
@@ -327,9 +335,13 @@ namespace Idmr.TieLayoutEditor
 								image.FlipX = (c.Vars[0] == 1);
 								image.FlipY = (c.Vars[1] == 1);
 							}
-							else if (c.Code == Film.Chunk.OpCode.Display) image.Display = (c.Vars[0] == 1);
+							else if (c.Code == Film.Chunk.OpCode.Display)
+							{
+								image.ToggleDisplay = true;
+								image.Display = (c.Vars[0] == 1);
+							}
 						}
-						_events.Add(image);
+						if (image.Time == t) _events.Add(image);
 					}
 				}
 			}
@@ -341,15 +353,16 @@ namespace Idmr.TieLayoutEditor
 			if (p != null)
 				for (int i = p.StartIndex; i <= p.EndIndex; i++)
 					_palette.Entries[i] = p.Entries[i];
+			_palette.Entries[0] = Color.Fuchsia;
 		}
 		void loadEmpire()
 		{
 			if (_stars != null) return;	// already loaded in, can skip over since it's static
 			string dir = Path.GetDirectoryName(_lfd.FilePath) + "\\";
 			LfdFile empire = new LfdFile(dir + "EMPIRE.LFD");
-			Pltt p = (Pltt)empire.Resources["PLTTstandard"];
 			_stars = (Delt)empire.Resources["DELTstars"];
-			_empirePalette = p.Palette;
+			_empirePalette = ((Pltt)empire.Resources["PLTTstandard"]).Palette;
+			_empirePalette.Entries[0] = Color.Fuchsia;
 			_stars.Palette = _empirePalette;
 			_tiesfx = new LfdFile(dir + "TIESFX.LFD");
 			_tiesfx2 = new LfdFile(dir + "TIESFX2.LFD");
@@ -359,9 +372,42 @@ namespace Idmr.TieLayoutEditor
 
 		void performEvents()
 		{
-			//TODO: event processing
-
 			short unused = -2527;  // there are negative layers in a few cases, need to make room for them
+			if (_time == 0)
+				for (int i = 0; i < _images.Length; i++)
+				{
+					_images[i].StartTime = -1;
+					_images[i].Layer = unused;
+					_images[i].ProcessedImage = null;
+				}
+
+			// Process Animate and Move updates prior to potentially reassigning values
+			for (int b = 0; b < _images.Length; b++)
+			{
+				if (_images[b].StartTime == -1 || _images[b].StartTime > _time) continue;
+
+				if (_images[b].StartTime < _time)
+				{
+					_images[b].X += _images[b].XRate;
+					_images[b].Y += _images[b].YRate;
+					if (_images[b].FrameRate != 0)
+					{
+						var res = _lfd.Resources[lstBlocks.Items[b].ToString()];
+						if (res != null && res.Type == Resource.ResourceType.Anim)
+						{
+							Anim a = (Anim)res;
+							if (_images[b].Frame + _images[b].FrameRate >= a.NumberOfFrames) _images[b].Frame = (short)(a.NumberOfFrames - 1);
+							else if (_images[b].Frame + _images[b].FrameRate < 0) _images[b].Frame = 0;
+							else _images[b].Frame += _images[b].FrameRate;
+
+							_images[b].ProcessedImage = (Bitmap)a.Frames[_images[b].Frame].Image.Clone();
+							_images[b].ProcessedImage.RotateFlip(_images[b].FlipType);
+							_images[b].ProcessedImage.MakeTransparent(Color.Fuchsia);
+						}
+					}
+				}
+			}
+
 			bool needToSort = false;
 			for (int ev = 0; ev < _events.Count; ev++)
 			{
@@ -375,21 +421,25 @@ namespace Idmr.TieLayoutEditor
 				if (_film.Blocks[e.BlockIndex].TypeNum == 3)
 				{
 					needToSort = true;
-					if (!e.Display)
+					if (e.ToggleDisplay && !e.Display)
 					{
 						_images[e.BlockIndex].Layer = unused;
-						// TODO: there are cases where commands are also assigned during an OFF code
 					}
-					else
+					else if (e.ToggleDisplay && e.Display)
 					{
 						_images[e.BlockIndex].Layer = e.Layer;
-						if (e.FlipX && e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipXY;
-						else if (e.FlipX) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipX;
-						else if (e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipY;
-						_images[e.BlockIndex].XRate = e.XRate;
-						_images[e.BlockIndex].YRate = e.YRate;
-						if (e.Left != 0 || e.Right != 0) _images[e.BlockIndex].Window = new Rectangle(e.Left, e.Top, e.Right - e.Left + 1, e.Bottom - e.Top + 1);
+						_images[e.BlockIndex].StartTime = (short)_time;
+					}
 
+					if (e.FlipX && e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipXY;
+					else if (e.FlipX) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipX;
+					else if (e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipY;
+					_images[e.BlockIndex].XRate = e.XRate;
+					_images[e.BlockIndex].YRate = e.YRate;
+					if (e.Left != e.Right) _images[e.BlockIndex].Window = new Rectangle(e.Left, e.Top, e.Right - e.Left + 1, e.Bottom - e.Top + 1);
+
+					if (_images[e.BlockIndex].ProcessedImage == null)
+					{
 						if (_film.Blocks[e.BlockIndex].ToString() == _stars.ToString())
 						{
 							_images[e.BlockIndex].ProcessedImage = (Bitmap)_stars.Image.Clone();
@@ -417,29 +467,54 @@ namespace Idmr.TieLayoutEditor
 									{
 										Anim a = (Anim)_lfd.Resources[r];
 										a.SetPalette(_palette);
+										// BUG: unused areas around Frame aren't transparent
 										a.RelativePosition = true;
 
-										_images[e.BlockIndex].Frame = e.Frame;
+										// either going to define the frame, or set a motion
+										if (e.Frame != -1) _images[e.BlockIndex].Frame = e.Frame;
 										_images[e.BlockIndex].FrameRate = e.Framerate;
-										_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[e.Frame].Image.Clone();
+										_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[_images[e.BlockIndex].Frame].Image.Clone();
 										_images[e.BlockIndex].X = (short)(a.Left + e.X);
 										_images[e.BlockIndex].Y = (short)(a.Top + e.Y);
-										// Anim flips will be handled later
+										_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
 									}
 									// currently no CUST processing, but I think it's the same as DELT
 									break;
 								}
 							}
 						}
-						_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Black);
+						_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Fuchsia);
 					}
+					else
+					{
+						var res = _lfd.Resources[lstBlocks.Items[e.BlockIndex].ToString()];
+						if (res != null && res.Type == Resource.ResourceType.Anim)
+						{
+							Anim a = (Anim)res;
+							a.SetPalette(_palette);
+							a.RelativePosition = true;
+
+							if (e.Frame != -1) _images[e.BlockIndex].Frame = e.Frame;
+							_images[e.BlockIndex].FrameRate = e.Framerate;
+							_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[_images[e.BlockIndex].Frame].Image.Clone();
+							// already defined, so adjust if necessary
+							_images[e.BlockIndex].X += e.X;
+							_images[e.BlockIndex].Y += e.Y;
+							_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
+							_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Fuchsia);
+						}
+					}
+				}
+
+				if (e.Start && _isPlaying)
+				{
+					playWav(e.BlockIndex, e.Volume, e.Balance);
 				}
 			}
 			if (needToSort) sortLayers();
 
-			// update images: animation frames, Moves, Windows
-			// View transitions
-			// update Volume/balance, audio looping
+			// TODO: View transitions
+			// TODO: audio looping
 		}
 
 		/// <summary>Takes the raw block layer info, sorts it into _drawOrder</summary>
@@ -465,132 +540,13 @@ namespace Idmr.TieLayoutEditor
 					}
 					else break;
 		}
-		
-		void updateView()
-		{
-			for (int b = 0; b < _film.NumberOfBlocks; b++) _drawOrder[b] = -1;
-			for (short b = 0; b < _film.NumberOfBlocks; b++)
-			{
-				string str = lstBlocks.Items[b].ToString();
-				if (str.StartsWith("PLTT") && str.IndexOf("*") == -1)
-					foreach (Film.Chunk c in _film.Blocks[b].Chunks)
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) loadPltt(_film.Blocks[b].ToString());
-
-				_images[b].Layer = -2527;   // there are negative layers in a few cases, need to make room for them
-				if (_film.Blocks[b].TypeNum == 3)
-					foreach (Film.Chunk c in _film.Blocks[b].Chunks)
-					{
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
-						if (c.Code == Film.Chunk.OpCode.Display && c.Vars[0] == 0) { _images[b].Layer = -2527; break; } // hidden
-						if (c.Code == Film.Chunk.OpCode.Display && c.Vars[0] == 1 && _images[b].Layer == -2527) { _images[b].Layer = 0; }    // default (top)
-						if (c.Code == Film.Chunk.OpCode.Layer) { _images[b].Layer = c.Vars[0]; }
-					}
-			}
-			sortLayers();
-
-			#region get images
-			for (int i = 0; i < _drawOrder.Length; i++)
-			{
-				int block = _drawOrder[i];
-				if (block == -1 || _film.Blocks[block].Type == Film.Block.BlockType.Cust) continue;
-				if (_film.Blocks[block].ToString() == _stars.ToString())
-				{
-					_images[block].ProcessedImage = _stars.Image;
-					_images[block].ProcessedImage.MakeTransparent(Color.Black);
-					_images[block].X = _stars.Left;
-					_images[block].Y = _stars.Top;
-				}
-				for (int j = 0; j < _lfd.Resources.Count; j++)
-					if (_lfd.Resources[j].ToString() == _film.Blocks[block].ToString())
-					{
-						if (_lfd.Resources[j].Type == Resource.ResourceType.Delt)
-						{
-							Delt d = (Delt)_lfd.Resources[j];
-							d.Palette = _palette;
-							_images[block].ProcessedImage = (Bitmap)d.Image.Clone();
-							_images[block].ProcessedImage.MakeTransparent(Color.Black);
-							_images[block].X = d.Left;
-							_images[block].Y = d.Top;
-						}
-						else if (_lfd.Resources[j].Type == Resource.ResourceType.Anim)
-						{
-							Anim a = (Anim)_lfd.Resources[j];
-							a.SetPalette(_palette);
-							a.RelativePosition = true;
-							int currentTime = -1;
-							foreach (Film.Chunk c in _film.Blocks[block].Chunks)
-							{
-								if (currentTime != _time) currentTime = -1;
-
-								if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) currentTime = _time;
-								else if (c.Code == Film.Chunk.OpCode.Frame) _images[block].Frame = c.Vars[0];
-								else if (c.Code == Film.Chunk.OpCode.Animation)
-								{
-									_images[block].FrameRate = c.Vars[0];
-									//_animation[block, 2] = c.Vars[1];
-								}
-								else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
-							}
-							_images[block].ProcessedImage = (Bitmap)a.Frames[_images[block].Frame].Image.Clone();
-							_images[block].ProcessedImage.MakeTransparent(Color.Black);
-							_images[block].X = a.Left;
-							_images[block].Y = a.Top;
-						}
-						// currently no CUST processing, but I think it's the same as DELT
-						break;
-					}
-				foreach (Film.Chunk c in _film.Blocks[block].Chunks)
-				{
-					if (c.Code == Film.Chunk.OpCode.Move)
-					{
-						_images[block].X += c.Vars[0];
-						_images[block].Y += c.Vars[1];
-					}
-					else if (c.Code == Film.Chunk.OpCode.Window)
-					{
-						Debug.WriteLine("Window code detected: " + _film.Blocks[block].ToString());
-					}
-					else if (c.Code == Film.Chunk.OpCode.Shift)
-					{
-						Debug.WriteLine("Shift code detected: " + _film.Blocks[block].ToString());
-					}
-					else if (c.Code == Film.Chunk.OpCode.Orientation && _images[block].ProcessedImage != null)
-					{
-						if (c.Vars[0] == 1) _images[block].ProcessedImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
-						if (c.Vars[1] == 1) _images[block].ProcessedImage.RotateFlip(RotateFlipType.RotateNoneFlipY);
-					}
-					else if (c.Code == Film.Chunk.OpCode.Animation)
-					{
-						Debug.WriteLine("Animation code detected: " + _film.Blocks[block].ToString());
-					}
-					else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
-				}
-
-			}
-			#endregion
-			for (int b = 0; b < _film.NumberOfBlocks; b++)
-			{
-				if (_film.Blocks[b].Type == Film.Block.BlockType.Voic)
-				{
-					int currentTime = -1;
-					foreach (Film.Chunk c in _film.Blocks[b].Chunks)
-					{
-						if (currentTime != _time) currentTime = -1;
-						if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] == _time) currentTime = _time;
-						else if ((c.Code == Film.Chunk.OpCode.Sound || c.Code == Film.Chunk.OpCode.Stereo) && c.Vars[0] == 1 && currentTime == _time && _isPlaying) playWav(b);
-						else if (c.Code == Film.Chunk.OpCode.Time && c.Vars[0] > _time) break;
-						else if (c.Code == Film.Chunk.OpCode.Loop) Debug.WriteLine("Loop code detected: " + _film.Blocks[b].ToString());
-					}
-				}
-			}
-		}
 
 		// TODO: should figure out mouse clicks/drags for pctView
 		private void lstBlocks_SelectedIndexChanged(object sender, EventArgs e)
 		{
 			pctView.Refresh();
 			if (_film.Blocks[lstBlocks.SelectedIndex].TypeNum == 3) BoxImage(lstBlocks.SelectedIndex);
-			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) playWav(lstBlocks.SelectedIndex);
+			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) playWav(lstBlocks.SelectedIndex, 100, 0);
 			if (_fEvent == null || !_fEvent.Created)
 			{
 				_fEvent = new EventForm(ref _film.Blocks[lstBlocks.SelectedIndex]);
@@ -625,7 +581,8 @@ namespace Idmr.TieLayoutEditor
 				cmdPlayPause.Text = "| |";
 				_isPlaying = true;
 				tmrPlayback.Start();
-				updateView();
+				performEvents();
+				//updateView();
 				PaintFilm();
 			}
 			else
@@ -642,7 +599,8 @@ namespace Idmr.TieLayoutEditor
 			_time = hsbTime.Value;
 			lblTime.Text = _time.ToString("x4");
 			if (_loading) return;
-			updateView();
+			//updateView();
+			performEvents();
 			PaintFilm();
 		}
 
@@ -664,21 +622,19 @@ namespace Idmr.TieLayoutEditor
 		{
 			public short Time;
 			public short BlockIndex;
-			//public Film.Chunk.OpCode OpCode;
-			//public short[] Vars;
 
 			// View
 			public short ViewTransition;
 			public short ViewParameter;
 
 			// Images
+			public bool ToggleDisplay;
 			public bool Display;
 			public short Layer;
 			public short X;
 			public short Y;
 			public short XRate;
 			public short YRate;
-			public bool Animate;
 			public short Frame;
 			public short Framerate;
 			public short Left;
