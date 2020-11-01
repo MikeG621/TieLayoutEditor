@@ -360,19 +360,16 @@ namespace Idmr.TieLayoutEditor
 		void performEvents()
 		{
 			//TODO: event processing
-			// ideally, only process events at the current time
-			// only redo layers if there's a new Display code. Change drawOrder to a List?
 
-			// determine layer order and sort
-			// draw images, including frames and Move codes
-			// audio, including looping
 			short unused = -2527;  // there are negative layers in a few cases, need to make room for them
 			bool needToSort = false;
-			foreach (Event e in _events)
+			for (int ev = 0; ev < _events.Count; ev++)
 			{
-				if (e.Time > _time) break;
-				if (e.Time < _time) continue;
-				
+				if (_events[ev].Time > _time) break;
+				if (_events[ev].Time < _time) continue;
+
+				Event e = _events[ev];
+
 				if (e.LoadPalette) loadPltt(_film.Blocks[e.BlockIndex].ToString());
 
 				if (_film.Blocks[e.BlockIndex].TypeNum == 3)
@@ -381,27 +378,68 @@ namespace Idmr.TieLayoutEditor
 					if (!e.Display)
 					{
 						_images[e.BlockIndex].Layer = unused;
+						// TODO: there are cases where commands are also assigned during an OFF code
 					}
 					else
 					{
 						_images[e.BlockIndex].Layer = e.Layer;
+						if (e.FlipX && e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipXY;
+						else if (e.FlipX) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipX;
+						else if (e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipY;
+						_images[e.BlockIndex].XRate = e.XRate;
+						_images[e.BlockIndex].YRate = e.YRate;
+						if (e.Left != 0 || e.Right != 0) _images[e.BlockIndex].Window = new Rectangle(e.Left, e.Top, e.Right - e.Left + 1, e.Bottom - e.Top + 1);
+
 						if (_film.Blocks[e.BlockIndex].ToString() == _stars.ToString())
 						{
-							_images[e.BlockIndex].ProcessedImage = _stars.Image;
-							_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Black);
+							_images[e.BlockIndex].ProcessedImage = (Bitmap)_stars.Image.Clone();
 							// DELTstars is at 0,0, so we can just use these, which default to 0,0 anyway
 							_images[e.BlockIndex].X = e.X;
 							_images[e.BlockIndex].Y = e.Y;
-							_images[e.BlockIndex].XRate = e.XRate;
-							_images[e.BlockIndex].YRate = e.YRate;
-							if (e.FlipX) _images[e.BlockIndex].ProcessedImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
-							if (e.FlipY) _images[e.BlockIndex].ProcessedImage.RotateFlip(RotateFlipType.RotateNoneFlipY);
-							if (e.Left != 0 || e.Right != 0) _images[e.BlockIndex].Window = new Rectangle(e.Left, e.Top, e.Right - e.Left + 1, e.BlockIndex - e.Top + 1);
+							_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
 						}
+						else
+						{
+							for (int r = 0; r < _lfd.Resources.Count; r++)
+							{
+								if (_lfd.Resources[r].ToString() == _film.Blocks[e.BlockIndex].ToString())
+								{
+									if (_lfd.Resources[r].Type == Resource.ResourceType.Delt)
+									{
+										Delt d = (Delt)_lfd.Resources[r];
+										d.Palette = _palette;
+										_images[e.BlockIndex].ProcessedImage = (Bitmap)d.Image.Clone();
+										_images[e.BlockIndex].X = (short)(d.Left + e.X);
+										_images[e.BlockIndex].Y = (short)(d.Top + e.Y);
+										_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
+									}
+									else if (_lfd.Resources[r].Type == Resource.ResourceType.Anim)
+									{
+										Anim a = (Anim)_lfd.Resources[r];
+										a.SetPalette(_palette);
+										a.RelativePosition = true;
+
+										_images[e.BlockIndex].Frame = e.Frame;
+										_images[e.BlockIndex].FrameRate = e.Framerate;
+										_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[e.Frame].Image.Clone();
+										_images[e.BlockIndex].X = (short)(a.Left + e.X);
+										_images[e.BlockIndex].Y = (short)(a.Top + e.Y);
+										// Anim flips will be handled later
+									}
+									// currently no CUST processing, but I think it's the same as DELT
+									break;
+								}
+							}
+						}
+						_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Black);
 					}
 				}
 			}
 			if (needToSort) sortLayers();
+
+			// update images: animation frames, Moves, Windows
+			// View transitions
+			// update Volume/balance, audio looping
 		}
 
 		/// <summary>Takes the raw block layer info, sorts it into _drawOrder</summary>
@@ -672,6 +710,7 @@ namespace Idmr.TieLayoutEditor
 			public short FrameRate;
 			public Bitmap ProcessedImage;
 			public Rectangle Window;
+			public RotateFlipType FlipType;
 		}
 	}
 }
