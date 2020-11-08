@@ -1,7 +1,6 @@
 ﻿using Idmr.LfdReader;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -291,6 +290,7 @@ namespace Idmr.TieLayoutEditor
 						Event image = new Event { BlockIndex = b };
 						image.Frame = -1;   // this'll get reset if explicitly set, otherwise use defaults'
 						image.Time = -1;
+						image.Framerate = -2527;	// denotes "no change"
 
 						for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
 						{
@@ -379,6 +379,7 @@ namespace Idmr.TieLayoutEditor
 					_images[i].StartTime = -1;
 					_images[i].Layer = unused;
 					_images[i].ProcessedImage = null;
+					_images[i].Frame = 0;
 				}
 
 			// Process Animate and Move updates prior to potentially reassigning values
@@ -420,15 +421,16 @@ namespace Idmr.TieLayoutEditor
 
 				if (_film.Blocks[e.BlockIndex].TypeNum == 3)
 				{
-					needToSort = true;
 					if (e.ToggleDisplay && !e.Display)
 					{
 						_images[e.BlockIndex].Layer = unused;
+						needToSort = true;
 					}
 					else if (e.ToggleDisplay && e.Display)
 					{
 						_images[e.BlockIndex].Layer = e.Layer;
 						_images[e.BlockIndex].StartTime = (short)_time;
+						needToSort = true;
 					}
 
 					if (e.FlipX && e.FlipY) _images[e.BlockIndex].FlipType = RotateFlipType.RotateNoneFlipXY;
@@ -467,7 +469,6 @@ namespace Idmr.TieLayoutEditor
 									{
 										Anim a = (Anim)_lfd.Resources[r];
 										a.SetPalette(_palette);
-										// BUG: unused areas around Frame aren't transparent
 										a.RelativePosition = true;
 
 										// either going to define the frame, or set a motion
@@ -495,7 +496,7 @@ namespace Idmr.TieLayoutEditor
 							a.RelativePosition = true;
 
 							if (e.Frame != -1) _images[e.BlockIndex].Frame = e.Frame;
-							_images[e.BlockIndex].FrameRate = e.Framerate;
+							if (e.Framerate != unused) _images[e.BlockIndex].FrameRate = e.Framerate;
 							_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[_images[e.BlockIndex].Frame].Image.Clone();
 							// already defined, so adjust if necessary
 							_images[e.BlockIndex].X += e.X;
@@ -599,7 +600,14 @@ namespace Idmr.TieLayoutEditor
 			_time = hsbTime.Value;
 			lblTime.Text = _time.ToString("x4");
 			if (_loading) return;
-			//updateView();
+
+			if (_time == 0)
+			{
+				_isPlaying = false;
+				tmrPlayback.Stop();
+				cmdPlayPause.Text = ">";
+				for (int i = 0; i < _activeSounds.Count; i++) _activeSounds[i].Stop();
+			}
 			performEvents();
 			PaintFilm();
 		}
