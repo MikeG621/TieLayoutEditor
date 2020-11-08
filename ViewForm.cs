@@ -31,6 +31,7 @@ namespace Idmr.TieLayoutEditor
 		readonly List<System.Windows.Media.MediaPlayer> _activeSounds = new List<System.Windows.Media.MediaPlayer>();
 		readonly List<Event> _events = new List<Event>();
 		EventForm _fEvent = null;
+		readonly short _unused = -2527;
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
@@ -52,7 +53,7 @@ namespace Idmr.TieLayoutEditor
 			Graphics g = Graphics.FromImage(image);
 			for (int i = 0; i < _drawOrder.Length; i++)
 			{
-				if (_drawOrder[i] == -1 || _images[_drawOrder[i]].ProcessedImage == null) continue;
+				if (_drawOrder[i] == -1 || _images[_drawOrder[i]].ProcessedImage == null || !_images[_drawOrder[i]].IsVisible) continue;
 				// TODO: Windows; DrawImageUnscaledAndClipped
 				g.DrawImageUnscaled(_images[_drawOrder[i]].ProcessedImage, _images[_drawOrder[i]].X, _images[_drawOrder[i]].Y);
 			}
@@ -140,14 +141,13 @@ namespace Idmr.TieLayoutEditor
 		/// <param name="index">Block index</param>
 		public void BoxImage(int index)
 		{
-			// TODO: fix BoxImage so it'll work on any visible frame
+			// TODO: fix BoxImage so it'll only highlight if currently visible
 			string str = lstBlocks.Items[index].ToString();
 			str = str.Replace("*", "");
 			Resource img = _lfd.Resources[str];
 			if (img == null)
 				if (lstBlocks.Items[index].ToString() == _stars.ToString() + "*") img = _stars;
 				else return;
-			if (_film.Blocks[index].Chunks[0].Code == Film.Chunk.OpCode.End || _film.Blocks[index].Chunks[0].Vars[0] != 0) return; // skip stuff not on first frame
 			Debug.WriteLine("boxing...");
 			Graphics g = pctView.CreateGraphics();
 			Pen pnFrame = new Pen(Color.Red);
@@ -290,7 +290,7 @@ namespace Idmr.TieLayoutEditor
 						Event image = new Event { BlockIndex = b };
 						image.Frame = -1;   // this'll get reset if explicitly set, otherwise use defaults'
 						image.Time = -1;
-						image.Framerate = -2527;	// denotes "no change"
+						image.Framerate = _unused;
 
 						for (int chunk = 0; chunk < _film.Blocks[b].NumberOfChunks; chunk++)
 						{
@@ -302,6 +302,7 @@ namespace Idmr.TieLayoutEditor
 
 							if (c.Code == Film.Chunk.OpCode.Move)
 							{
+								image.SetPosition = true;
 								image.X = c.Vars[0];
 								image.Y = c.Vars[1];
 							}
@@ -372,12 +373,11 @@ namespace Idmr.TieLayoutEditor
 
 		void performEvents()
 		{
-			short unused = -2527;  // there are negative layers in a few cases, need to make room for them
 			if (_time == 0)
 				for (int i = 0; i < _images.Length; i++)
 				{
 					_images[i].StartTime = -1;
-					_images[i].Layer = unused;
+					_images[i].Layer = _unused;
 					_images[i].ProcessedImage = null;
 					_images[i].Frame = 0;
 				}
@@ -423,12 +423,12 @@ namespace Idmr.TieLayoutEditor
 				{
 					if (e.ToggleDisplay && !e.Display)
 					{
-						_images[e.BlockIndex].Layer = unused;
+						_images[e.BlockIndex].IsVisible = false;
 						needToSort = true;
 					}
 					else if (e.ToggleDisplay && e.Display)
 					{
-						_images[e.BlockIndex].Layer = e.Layer;
+						_images[e.BlockIndex].IsVisible = true;
 						_images[e.BlockIndex].StartTime = (short)_time;
 						needToSort = true;
 					}
@@ -442,6 +442,9 @@ namespace Idmr.TieLayoutEditor
 
 					if (_images[e.BlockIndex].ProcessedImage == null)
 					{
+						// this prevents Layer from being redefined, assuming it never gets reset
+						_images[e.BlockIndex].Layer = e.Layer;
+
 						if (_film.Blocks[e.BlockIndex].ToString() == _stars.ToString())
 						{
 							_images[e.BlockIndex].ProcessedImage = (Bitmap)_stars.Image.Clone();
@@ -488,6 +491,8 @@ namespace Idmr.TieLayoutEditor
 					}
 					else
 					{
+						if (e.Layer != 0) Debug.WriteLine("Layer reassignment: " + lstBlocks.Items[e.BlockIndex].ToString() + " Time: " + e.Time);
+
 						var res = _lfd.Resources[lstBlocks.Items[e.BlockIndex].ToString()];
 						if (res != null && res.Type == Resource.ResourceType.Anim)
 						{
@@ -496,13 +501,21 @@ namespace Idmr.TieLayoutEditor
 							a.RelativePosition = true;
 
 							if (e.Frame != -1) _images[e.BlockIndex].Frame = e.Frame;
-							if (e.Framerate != unused) _images[e.BlockIndex].FrameRate = e.Framerate;
+							if (e.Framerate != _unused) _images[e.BlockIndex].FrameRate = e.Framerate;
 							_images[e.BlockIndex].ProcessedImage = (Bitmap)a.Frames[_images[e.BlockIndex].Frame].Image.Clone();
-							// already defined, so adjust if necessary
-							_images[e.BlockIndex].X += e.X;
-							_images[e.BlockIndex].Y += e.Y;
+							if (e.SetPosition)
+							{
+								_images[e.BlockIndex].X = (short)(a.Left + e.X);
+								_images[e.BlockIndex].Y = (short)(a.Top + e.Y);
+							}
 							_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
 							_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Fuchsia);
+						}
+						else if (res != null && res.Type == Resource.ResourceType.Delt && e.SetPosition)
+						{
+							Delt d = (Delt)res;
+							_images[e.BlockIndex].X = (short)(d.Left + e.X);
+							_images[e.BlockIndex].Y = (short)(d.Top + e.Y);
 						}
 					}
 				}
@@ -524,7 +537,7 @@ namespace Idmr.TieLayoutEditor
 			short[] layers = new short[_film.NumberOfBlocks];
 			for (int b = 0; b < _film.NumberOfBlocks; b++)
 			{
-				_drawOrder[b] = (short)(_images[b].Layer != -2527 ? b : -1);
+				_drawOrder[b] = (short)(_images[b].Layer != _unused && _images[b].IsVisible ? b : -1);
 				layers[b] = _images[b].Layer;
 			}
 
@@ -598,7 +611,7 @@ namespace Idmr.TieLayoutEditor
 		private void hsbTime_ValueChanged(object sender, EventArgs e)
 		{
 			_time = hsbTime.Value;
-			lblTime.Text = _time.ToString("x4");
+			lblTime.Text = _time.ToString();
 			if (_loading) return;
 
 			if (_time == 0)
@@ -639,6 +652,7 @@ namespace Idmr.TieLayoutEditor
 			public bool ToggleDisplay;
 			public bool Display;
 			public short Layer;
+			public bool SetPosition;
 			public short X;
 			public short Y;
 			public short XRate;
@@ -664,6 +678,7 @@ namespace Idmr.TieLayoutEditor
 
 		public struct Image
 		{
+			public bool IsVisible;
 			public short StartTime;
 			public short X;
 			public short Y;
