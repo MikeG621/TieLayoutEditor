@@ -18,7 +18,7 @@ namespace Idmr.TieLayoutEditor
 		static LfdFile _tiesfx2 = null;
 		static LfdFile _tiespch = null;
 		static LfdFile _tiespch2 = null;
-		ColorPalette _palette;
+		readonly ColorPalette _palette;
 		static ColorPalette _empirePalette = null;
 		short[] _drawOrder;	// determines order of painting bm[]
 		Image[] _images;
@@ -49,16 +49,24 @@ namespace Idmr.TieLayoutEditor
 
 		public void PaintFilm()
 		{
-			Bitmap image = new Bitmap(640, 480);
-			Graphics g = Graphics.FromImage(image);
+			Bitmap view = new Bitmap(640, 480);
+			Graphics g = Graphics.FromImage(view);
 			for (int i = 0; i < _drawOrder.Length; i++)
 			{
 				if (_drawOrder[i] == -1 || _images[_drawOrder[i]].ProcessedImage == null || !_images[_drawOrder[i]].IsVisible) continue;
-				// TODO: Windows; DrawImageUnscaledAndClipped
-				g.DrawImageUnscaled(_images[_drawOrder[i]].ProcessedImage, _images[_drawOrder[i]].X, _images[_drawOrder[i]].Y);
+				Image image = _images[_drawOrder[i]];
+				if (image.Window.Width != 0)
+				{
+					Bitmap window = new Bitmap(image.Window.Width, image.Window.Height);
+					Graphics g2 = Graphics.FromImage(window);
+					g2.DrawImageUnscaled(image.ProcessedImage, image.X - image.Window.X, image.Y - image.Window.Y);
+					g2.Dispose();
+					g.DrawImageUnscaled(window, image.Window.X, image.Window.Y);
+				}
+				else g.DrawImageUnscaled(image.ProcessedImage, image.X, image.Y);
 			}
 			pctView.BackColor = Color.Black;
-			pctView.Image = image;
+			pctView.Image = view;
 			g.Dispose();
 		}
 		public void LoadFilm(ref LfdFile lfd, object tag)
