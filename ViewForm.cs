@@ -1,4 +1,5 @@
-﻿using Idmr.LfdReader;
+﻿using Idmr.Common;
+using Idmr.LfdReader;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,6 +20,7 @@ namespace Idmr.TieLayoutEditor
 		static LfdFile _tiespch = null;
 		static LfdFile _tiespch2 = null;
 		readonly ColorPalette _palette;
+		ColorPalette _rotatedPalette;
 		static ColorPalette _empirePalette = null;
 		short[] _drawOrder;	// determines order of painting bm[]
 		Image[] _images;
@@ -32,6 +34,8 @@ namespace Idmr.TieLayoutEditor
 		readonly List<Event> _events = new List<Event>();
 		EventForm _fEvent = null;
 		readonly short _unused = -2527;
+        readonly bool _hasRotators = false;
+        readonly bool[] _rotatedIndexes = new bool[256];
 
 		public ViewForm(ref LfdFile lfd, object tag)
 		{
@@ -39,11 +43,27 @@ namespace Idmr.TieLayoutEditor
 			InitializeComponent();
 			Height = 600;
 			_lfd = lfd;
+			for (int i = 0; i < _lfd.Resources.Count; i++)
+				if (_lfd.Resources[i].Type == Resource.ResourceType.Pltt && ((Pltt)_lfd.Resources[i]).RotatorCount > 0)
+				{
+					_hasRotators = true;
+					var pltt = (Pltt)_lfd.Resources[i];
+					for (int r = 0; r < pltt.RotatorCount; r++)
+						for (int c = 0; c < pltt.Rotators[r].RotatedColors.Length; c++)
+							_rotatedIndexes[pltt.Rotators[r].StartIndex + c] = true;
+				}
 			loadEmpire();
 			Bitmap t = new Bitmap(1, 1, PixelFormat.Format8bppIndexed);
 			_palette = t.Palette;
 			t.Dispose();
-			for (int c = 0; c < 256; c++) _palette.Entries[c] = _empirePalette.Entries[c]; // this ensures _empire isn't modified
+            t = new Bitmap(1, 1, PixelFormat.Format8bppIndexed);
+			_rotatedPalette = t.Palette;
+			t.Dispose();
+			for (int c = 0; c < 256; c++)
+			{
+				_palette.Entries[c] = _empirePalette.Entries[c]; // this ensures _empire isn't modified
+				_rotatedPalette.Entries[c] = _palette.Entries[c];
+			}
 			LoadFilm(ref lfd, tag);
 		}
 
@@ -173,35 +193,6 @@ namespace Idmr.TieLayoutEditor
 			}
 			// again, skip CUST for now
 			g.Dispose();
-		}
-		void playWav(int blockIndex, short volume, short balance)
-		{
-			playWav(lstBlocks.Items[blockIndex].ToString(), volume, balance);
-		}
-		void playWav(Film.Block block, short volume, short balance)
-		{
-			playWav(block.ToString(), volume, balance);
-		}
-		void playWav(string id, short volume, short balance)
-		{
-			var plr = new System.Windows.Media.MediaPlayer();
-			plr.MediaEnded += mediaPlayer_MediaEnded;
-			try
-			{
-				plr.Open(new Uri(MainForm._tempDir + id + ".wav"));
-				plr.Volume = (volume == 0 ? 100 : volume) * 0.5 / 100;
-				plr.Balance = (double)((balance == 0 ? 64 : balance) - 64) / 63;
-				plr.Play();
-				_activeSounds.Add(plr);
-			}
-			catch { }
-		}
-
-		private void mediaPlayer_MediaEnded(object sender, EventArgs e)
-		{
-			_activeSounds.Remove((System.Windows.Media.MediaPlayer)sender);
-			// TODO: Maybe do a Dictionary instead? Could tie the MP to the index of the FILM, then from here back out the index to handle repeats
-			// would need a new way to call Stop() during PlayPause
 		}
 
 		void buildEvents()
@@ -390,8 +381,8 @@ namespace Idmr.TieLayoutEditor
 					_images[i].Frame = 0;
 				}
 
-			// Process Animate and Move updates prior to potentially reassigning values
-			for (int b = 0; b < _images.Length; b++)
+            // Process Animate and Move updates prior to potentially reassigning values
+            for (int b = 0; b < _images.Length; b++)
 			{
 				if (_images[b].StartTime == -1 || _images[b].StartTime > _time) continue;
 
@@ -475,6 +466,7 @@ namespace Idmr.TieLayoutEditor
 										_images[e.BlockIndex].X = (short)(d.Left + e.X);
 										_images[e.BlockIndex].Y = (short)(d.Top + e.Y);
 										_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
+										if (_hasRotators) _images[e.BlockIndex].AffectedByRotation = locateRotatorPixels(_images[e.BlockIndex].ProcessedImage);
 									}
 									else if (_lfd.Resources[r].Type == Resource.ResourceType.Anim)
 									{
@@ -489,7 +481,8 @@ namespace Idmr.TieLayoutEditor
 										_images[e.BlockIndex].X = (short)(a.Left + e.X);
 										_images[e.BlockIndex].Y = (short)(a.Top + e.Y);
 										_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
-									}
+                                        if (_hasRotators) _images[e.BlockIndex].AffectedByRotation = locateRotatorPixels(_images[e.BlockIndex].ProcessedImage);
+                                    }
 									// currently no CUST processing, but I think it's the same as DELT
 									break;
 								}
@@ -516,7 +509,8 @@ namespace Idmr.TieLayoutEditor
 								_images[e.BlockIndex].X = (short)(a.Left + e.X);
 								_images[e.BlockIndex].Y = (short)(a.Top + e.Y);
 							}
-							_images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
+                            if (_hasRotators) _images[e.BlockIndex].AffectedByRotation = locateRotatorPixels(_images[e.BlockIndex].ProcessedImage);
+                            _images[e.BlockIndex].ProcessedImage.RotateFlip(_images[e.BlockIndex].FlipType);
 							_images[e.BlockIndex].ProcessedImage.MakeTransparent(Color.Fuchsia);
 						}
 						else if (res != null && res.Type == Resource.ResourceType.Delt && e.SetPosition)
@@ -535,8 +529,75 @@ namespace Idmr.TieLayoutEditor
 			}
 			if (needToSort) sortLayers();
 
-			// TODO: View transitions
-			// TODO: audio looping
+            if (_hasRotators && _time != 0)
+            {
+                for (int p = 0; p < _lfd.Resources.Count; p++)
+                {
+                    if (_lfd.Resources[p].Type == Resource.ResourceType.Pltt)
+                    {
+                        var pltt = (Pltt)_lfd.Resources[p];
+                        if (pltt.RotatorCount == 0) continue;
+                        for (int r = 0; r < pltt.RotatorCount; r++)
+                        {
+                            var rotator = pltt.Rotators[r];
+                            if (_time % rotator.CycleFrequency == 0) rotator.RotateColors();
+							for (int c = 0; c < rotator.RotatedColors.Length; c++)
+								_rotatedPalette.Entries[rotator.StartIndex + c] = rotator.RotatedColors[c];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < _images.Length; i++)
+                {
+					if (_images[i].IsVisible && _images[i].ProcessedImage != null && _images[i].AffectedByRotation)
+					{
+                        BitmapData bd32 = GraphicsFunctions.GetBitmapData(_images[i].ProcessedImage);
+						byte[] px32 = new byte[bd32.Stride * bd32.Height];
+						GraphicsFunctions.CopyImageToBytes(bd32, px32);
+						for (int y = 0; y < bd32.Height; y++)
+							for (int x = 0, pos = y * bd32.Stride; x < bd32.Width; x++)
+								for (int c = 0; c < 256; c++)
+								{
+									if (!_rotatedIndexes[c]) continue;
+									var clr = _palette.Entries[c];
+									if (px32[pos + x * 4 + 2] == clr.R && px32[pos + x * 4 + 1] == clr.G && px32[pos + x * 4] == clr.B)
+									{
+										px32[pos + x * 4 + 2] = _rotatedPalette.Entries[c].R;
+										px32[pos + x * 4 + 1] = _rotatedPalette.Entries[c].G;
+										px32[pos + x * 4] = _rotatedPalette.Entries[c].B;
+										break;
+									}
+								}
+
+						GraphicsFunctions.CopyBytesToImage(px32, bd32);
+						_images[i].ProcessedImage.UnlockBits(bd32);
+					}
+                }
+
+				for (int c = 0; c < 256; c++)
+                    if (_rotatedIndexes[c])	_palette.Entries[c] = _rotatedPalette.Entries[c];
+            }
+            // TODO: View transitions
+            // TODO: audio looping
+        }
+
+		void playWav(int blockIndex, short volume, short balance)
+		{
+			playWav(lstBlocks.Items[blockIndex].ToString(), volume, balance);
+		}
+		void playWav(string id, short volume, short balance)
+		{
+			var plr = new System.Windows.Media.MediaPlayer();
+			plr.MediaEnded += mediaPlayer_MediaEnded;
+			try
+			{
+				plr.Open(new Uri(MainForm._tempDir + id + ".wav"));
+				plr.Volume = (volume == 0 ? 100 : volume) * 0.5 / 100;
+				plr.Balance = (double)((balance == 0 ? 64 : balance) - 64) / 63;
+				plr.Play();
+				_activeSounds.Add(plr);
+			}
+			catch { }
 		}
 
 		/// <summary>Takes the raw block layer info, sorts it into _drawOrder</summary>
@@ -563,20 +624,33 @@ namespace Idmr.TieLayoutEditor
 					else break;
 		}
 
-		// TODO: should figure out mouse clicks/drags for pctView
-		private void lstBlocks_SelectedIndexChanged(object sender, EventArgs e)
+		bool locateRotatorPixels(Bitmap img)
 		{
-			pctView.Refresh();
-			if (_film.Blocks[lstBlocks.SelectedIndex].TypeNum == 3) BoxImage(lstBlocks.SelectedIndex);
-			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) playWav(lstBlocks.SelectedIndex, 100, 0);
-			if (_fEvent == null || !_fEvent.Created)
+            //TODO: scan for used px
+            BitmapData bd8 = GraphicsFunctions.GetBitmapData(img);
+            byte[] px8 = new byte[bd8.Stride * bd8.Height];
+            GraphicsFunctions.CopyImageToBytes(bd8, px8);
+            img.UnlockBits(bd8);
+
+			for (int c = 0; c < 256; c++)
 			{
-				_fEvent = new EventForm(ref _film.Blocks[lstBlocks.SelectedIndex]);
-				_fEvent.Show();
-				_fEvent.Left = Left + Width + 5;
-				_fEvent.Top = Top;
+				if (!_rotatedIndexes[c]) continue;
+
+				for (int p = 0; p < px8.Length; p++) 
+					if (px8[p] == c) return true;
 			}
-			else _fEvent.LoadBlock(ref _film.Blocks[lstBlocks.SelectedIndex]);
+
+			return false;
+        }
+		#region controls
+		// TODO: should figure out mouse clicks/drags for pctView
+		private void form_FormClosing(object sender, FormClosingEventArgs e)
+		{
+			if (!Directory.Exists(MainForm._tempDir)) return;
+			_activeSounds.Clear();
+			string[] files = Directory.GetFiles(MainForm._tempDir);
+			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
+			_fEvent?.Close();
 		}
 
 		private void cmdForward_Click(object sender, EventArgs e)
@@ -590,12 +664,6 @@ namespace Idmr.TieLayoutEditor
 			}
 			hsbTime.Value++;
 		}
-
-		private void tmrPlayback_Tick(object sender, EventArgs e)
-		{
-			cmdForward_Click("tmrPlayback_Tick", new EventArgs());
-		}
-
 		private void cmdPlayPause_Click(object sender, EventArgs e)
 		{
 			if (cmdPlayPause.Text == ">")
@@ -615,6 +683,10 @@ namespace Idmr.TieLayoutEditor
 				for (int i = 0; i < _activeSounds.Count; i++) _activeSounds[i].Stop();
 			}
 		}
+		private void cmdStart_Click(object sender, EventArgs e)
+		{
+			hsbTime.Value = 0;
+		}
 
 		private void hsbTime_ValueChanged(object sender, EventArgs e)
 		{
@@ -633,19 +705,33 @@ namespace Idmr.TieLayoutEditor
 			PaintFilm();
 		}
 
-		private void cmdStart_Click(object sender, EventArgs e)
+		private void lstBlocks_SelectedIndexChanged(object sender, EventArgs e)
 		{
-			hsbTime.Value = 0;
+			pctView.Refresh();
+			if (_film.Blocks[lstBlocks.SelectedIndex].TypeNum == 3) BoxImage(lstBlocks.SelectedIndex);
+			if (_film.Blocks[lstBlocks.SelectedIndex].Type == Film.Block.BlockType.Voic) playWav(lstBlocks.SelectedIndex, 100, 0);
+			if (_fEvent == null || !_fEvent.Created)
+			{
+				_fEvent = new EventForm(ref _film.Blocks[lstBlocks.SelectedIndex]);
+				_fEvent.Show();
+				_fEvent.Left = Left + Width + 5;
+				_fEvent.Top = Top;
+			}
+			else _fEvent.LoadBlock(ref _film.Blocks[lstBlocks.SelectedIndex]);
 		}
 
-		private void form_FormClosing(object sender, FormClosingEventArgs e)
+		private void mediaPlayer_MediaEnded(object sender, EventArgs e)
 		{
-			if (!Directory.Exists(MainForm._tempDir)) return;
-			_activeSounds.Clear();
-			string[] files = Directory.GetFiles(MainForm._tempDir);
-			for (int i = 0; i < files.Length; i++) File.Delete(files[i]);
-			if (_fEvent != null) _fEvent.Close();
+			_activeSounds.Remove((System.Windows.Media.MediaPlayer)sender);
+			// TODO: Maybe do a Dictionary instead? Could tie the MP to the index of the FILM, then from here back out the index to handle repeats
+			// would need a new way to call Stop() during PlayPause
 		}
+
+		private void tmrPlayback_Tick(object sender, EventArgs e)
+		{
+			cmdForward_Click("tmrPlayback_Tick", new EventArgs());
+		}
+		#endregion controls
 
 		public struct Event
 		{
@@ -698,6 +784,7 @@ namespace Idmr.TieLayoutEditor
 			public Bitmap ProcessedImage;
 			public Rectangle Window;
 			public RotateFlipType FlipType;
+			public bool AffectedByRotation;
 		}
 	}
 }

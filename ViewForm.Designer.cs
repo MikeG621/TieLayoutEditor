@@ -36,10 +36,8 @@
 			this.label2 = new System.Windows.Forms.Label();
 			this.hsbTime = new System.Windows.Forms.HScrollBar();
 			this.cmdStart = new System.Windows.Forms.Button();
-			this.cmdBack = new System.Windows.Forms.Button();
 			this.cmdPlayPause = new System.Windows.Forms.Button();
 			this.cmdForward = new System.Windows.Forms.Button();
-			this.cmdEnd = new System.Windows.Forms.Button();
 			this.tmrPlayback = new System.Windows.Forms.Timer(this.components);
 			this.lblTime = new System.Windows.Forms.Label();
 			((System.ComponentModel.ISupportInitialize)(this.pctView)).BeginInit();
@@ -99,18 +97,9 @@
 			this.cmdStart.UseVisualStyleBackColor = true;
 			this.cmdStart.Click += new System.EventHandler(this.cmdStart_Click);
 			// 
-			// cmdBack
-			// 
-			this.cmdBack.Location = new System.Drawing.Point(535, 539);
-			this.cmdBack.Name = "cmdBack";
-			this.cmdBack.Size = new System.Drawing.Size(27, 23);
-			this.cmdBack.TabIndex = 5;
-			this.cmdBack.Text = "<<";
-			this.cmdBack.UseVisualStyleBackColor = true;
-			// 
 			// cmdPlayPause
 			// 
-			this.cmdPlayPause.Location = new System.Drawing.Point(568, 539);
+			this.cmdPlayPause.Location = new System.Drawing.Point(535, 539);
 			this.cmdPlayPause.Name = "cmdPlayPause";
 			this.cmdPlayPause.Size = new System.Drawing.Size(27, 23);
 			this.cmdPlayPause.TabIndex = 5;
@@ -120,22 +109,13 @@
 			// 
 			// cmdForward
 			// 
-			this.cmdForward.Location = new System.Drawing.Point(601, 539);
+			this.cmdForward.Location = new System.Drawing.Point(568, 538);
 			this.cmdForward.Name = "cmdForward";
 			this.cmdForward.Size = new System.Drawing.Size(27, 23);
 			this.cmdForward.TabIndex = 5;
 			this.cmdForward.Text = ">>";
 			this.cmdForward.UseVisualStyleBackColor = true;
 			this.cmdForward.Click += new System.EventHandler(this.cmdForward_Click);
-			// 
-			// cmdEnd
-			// 
-			this.cmdEnd.Location = new System.Drawing.Point(634, 539);
-			this.cmdEnd.Name = "cmdEnd";
-			this.cmdEnd.Size = new System.Drawing.Size(27, 23);
-			this.cmdEnd.TabIndex = 5;
-			this.cmdEnd.Text = ">|";
-			this.cmdEnd.UseVisualStyleBackColor = true;
 			// 
 			// tmrPlayback
 			// 
@@ -157,10 +137,8 @@
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
 			this.ClientSize = new System.Drawing.Size(774, 570);
 			this.Controls.Add(this.lblTime);
-			this.Controls.Add(this.cmdEnd);
 			this.Controls.Add(this.cmdForward);
 			this.Controls.Add(this.cmdPlayPause);
-			this.Controls.Add(this.cmdBack);
 			this.Controls.Add(this.cmdStart);
 			this.Controls.Add(this.hsbTime);
 			this.Controls.Add(this.label2);
@@ -188,10 +166,8 @@
 		private System.Windows.Forms.Label label2;
 		private System.Windows.Forms.HScrollBar hsbTime;
 		private System.Windows.Forms.Button cmdStart;
-		private System.Windows.Forms.Button cmdBack;
 		private System.Windows.Forms.Button cmdPlayPause;
 		private System.Windows.Forms.Button cmdForward;
-		private System.Windows.Forms.Button cmdEnd;
 		private System.Windows.Forms.Timer tmrPlayback;
 		private System.Windows.Forms.Label lblTime;
 	}
